@@ -1,450 +1,114 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>TRACE AERIAL · COCKPIT</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trace Light iPad 控制</title>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
-:root{--amber:#f5a623;--amber-dim:#7a530f;--green:#00ff88;--red:#ff3b3b;--cyan:#00d4ff;--bg:#070a0e;--panel:#0b1018;--border:#1a2a3a}
-*{margin:0;padding:0;box-sizing:border-box}
-body{background:var(--bg);color:var(--amber);font-family:'Share Tech Mono',monospace;width:100vw;height:100vh;overflow:hidden;display:flex;flex-direction:column}
-body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.13) 2px,rgba(0,0,0,0.13) 4px);pointer-events:none;z-index:1000}
-body::after{content:'';position:fixed;inset:0;background:radial-gradient(ellipse at center,transparent 60%,rgba(0,0,0,0.65) 100%);pointer-events:none;z-index:999}
-.top-bar{display:flex;align-items:center;justify-content:space-between;padding:6px 16px;border-bottom:1px solid var(--border);background:linear-gradient(180deg,#0d1520 0%,var(--panel) 100%);flex-shrink:0;height:44px}
-.logo{font-family:'Orbitron',sans-serif;font-weight:900;font-size:14px;letter-spacing:4px;color:var(--cyan);text-shadow:0 0 12px rgba(0,212,255,.4)}
-.status-row{display:flex;gap:16px;align-items:center}
-.status-item{font-size:10px;letter-spacing:1px;color:#4a6a8a;display:flex;align-items:center;gap:5px}
-.dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);animation:blink 2s ease-in-out infinite}
-.dot.warn{background:var(--amber);box-shadow:0 0 6px var(--amber)}
-.dot.off{background:#333;box-shadow:none;animation:none}
-.clock{font-family:'Orbitron',sans-serif;font-size:13px;color:var(--amber);text-shadow:0 0 12px rgba(245,166,35,.5);letter-spacing:2px}
-.main{flex:1;display:grid;grid-template-columns:190px 1fr 190px;min-height:0}
-.side-panel{display:flex;flex-direction:column;gap:7px;padding:8px 7px;border-right:1px solid var(--border);background:var(--panel);overflow:hidden}
-.side-panel.right{border-right:none;border-left:1px solid var(--border)}
-.panel-block{background:#080f18;border:1px solid var(--border);border-radius:4px;padding:9px;position:relative;overflow:hidden}
-.panel-block::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--cyan),transparent);opacity:.35}
-.block-label{font-size:9px;letter-spacing:2px;color:#3a5a7a;margin-bottom:5px;text-transform:uppercase}
-.big-value{font-family:'Orbitron',sans-serif;font-size:24px;font-weight:700;color:var(--amber);text-shadow:0 0 12px rgba(245,166,35,.5);line-height:1}
-.big-unit{font-size:9px;color:var(--amber-dim);letter-spacing:1px;margin-top:2px}
-.sub-value{font-size:11px;color:#5a8aaa;margin-top:3px}
-.bar-gauge{margin-top:7px;height:4px;background:#0a1520;border-radius:2px;overflow:hidden}
-.bar-fill{height:100%;background:linear-gradient(90deg,var(--cyan),var(--green));border-radius:2px;transition:width .5s ease;box-shadow:0 0 6px var(--cyan)}
-.bar-fill.warn{background:linear-gradient(90deg,var(--amber),var(--red))}
-.center{position:relative;overflow:hidden;background:#000}
-#videoFeed{width:100%;height:100%;object-fit:cover;display:none}
-.video-placeholder{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:radial-gradient(ellipse at center,#0a1a2a 0%,#030608 100%)}
-.no-signal{font-family:'Orbitron',sans-serif;font-size:11px;letter-spacing:4px;color:#1a3a5a;margin-top:12px;animation:flicker 3s ease-in-out infinite}
-.video-overlay{position:absolute;inset:0;pointer-events:none}
-.corner{position:absolute;width:22px;height:22px;border-color:var(--cyan);border-style:solid;opacity:.7}
-.corner.tl{top:12px;left:12px;border-width:2px 0 0 2px}
-.corner.tr{top:12px;right:12px;border-width:2px 2px 0 0}
-.corner.bl{bottom:12px;left:12px;border-width:0 0 2px 2px}
-.corner.br{bottom:12px;right:12px;border-width:0 2px 2px 0}
-.crosshair{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:36px;height:36px}
-.crosshair::before{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:36px;height:1px;background:rgba(0,212,255,.35)}
-.crosshair::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:1px;height:36px;background:rgba(0,212,255,.35)}
-.chd{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:5px;height:5px;border-radius:50%;border:1px solid var(--cyan)}
-.horizon-overlay{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:110px;display:flex;align-items:center;gap:7px;transition:transform .25s ease}
-.horizon-line{flex:1;height:1px;background:rgba(0,255,136,.5)}
-.horizon-center{width:7px;height:7px;border:1px solid var(--green);border-radius:50%;flex-shrink:0}
-.rec-badge{position:absolute;top:14px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:5px;font-size:10px;letter-spacing:2px;color:var(--red)}
-.rec-dot{width:7px;height:7px;border-radius:50%;background:var(--red);box-shadow:0 0 8px var(--red);animation:blink 1s ease-in-out infinite}
-.telem-strip{position:absolute;bottom:0;left:0;right:0;height:34px;background:linear-gradient(0deg,rgba(7,10,14,.9) 0%,transparent 100%);display:flex;align-items:center;justify-content:space-around;padding:0 16px}
-.telem-item{font-size:10px;letter-spacing:1px;color:rgba(245,166,35,.6);display:flex;gap:5px}
-.telem-item span{color:var(--amber);font-weight:bold}
-.horizon-widget{position:relative;width:100%;padding-bottom:100%}
-.hcw{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
-canvas{display:block}
-.compass-wrap{position:relative;width:100%;aspect-ratio:1;display:flex;align-items:center;justify-content:center}
-.sparkline-wrap{height:38px;position:relative;overflow:hidden;margin-top:5px}
-.bottom-bar{height:30px;background:var(--panel);border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 14px;flex-shrink:0}
-.coord-display{font-size:10px;color:#3a6a9a;letter-spacing:1px;display:flex;gap:16px}
-.coord-display span{color:#5a8aaa}
-.mission-status{font-family:'Orbitron',sans-serif;font-size:9px;letter-spacing:3px;color:var(--green);text-shadow:0 0 8px var(--green);animation:flicker 4s ease-in-out infinite}
-.link-status{font-family:'Orbitron',sans-serif;font-size:9px;letter-spacing:2px;color:var(--amber)}
-@keyframes blink{0%,100%{opacity:1}50%{opacity:.15}}
-@keyframes flicker{0%,90%,100%{opacity:1}92%{opacity:.4}94%{opacity:1}96%{opacity:.2}}
-.scan-line{position:fixed;top:0;left:0;right:0;height:3px;background:linear-gradient(180deg,transparent,rgba(0,212,255,.05),transparent);animation:scanH 8s linear infinite;pointer-events:none;z-index:998}
-@keyframes scanH{0%{transform:translateY(-100%)}100%{transform:translateY(100vh)}}
+body { font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 0; }
+#header { background: #007ACC; color: white; padding: 12px; text-align: center; font-size: 20px; }
+#status { display: flex; justify-content: space-around; padding: 10px; background: #eee; }
+.dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; margin-right: 5px; }
+.off { background: #bbb; }
+.on { background: #0f0; }
+#controls { padding: 10px; }
+#videoContainer { text-align: center; margin: 10px; }
+#videoFeed { width: 90%; max-width: 600px; display: none; border: 1px solid #ccc; }
+#videoPlaceholder { width: 90%; max-width: 600px; height: 340px; background: #000; color: #fff; display: flex; align-items: center; justify-content: center; }
 </style>
 </head>
 <body>
-<div class="scan-line"></div>
-<div class="top-bar">
-  <div class="logo">TRACE AERIAL</div>
-  <div class="status-row">
-    <div class="status-item"><div class="dot" id="dotServer"></div><span id="lblServer">服务器</span></div>
-    <div class="status-item"><div class="dot off" id="dotPhone"></div><span id="lblPhone">iPhone离线</span></div>
-    <div class="status-item"><div class="dot off" id="dotVideo"></div><span id="lblVideo">视频</span></div>
-  </div>
-  <div class="clock" id="clock">--:--:--</div>
+<div id="header">Trace Light 控制 iPad 版</div>
+
+<div id="status">
+    <div>
+        <span class="dot off" id="dotServer"></span>
+        <span id="lblServer">服务器未连接</span>
+    </div>
+    <div>
+        <span class="dot off" id="dotVideo"></span>
+        <span id="lblVideo">视频未启用</span>
+    </div>
+    <div>
+        <span id="clock">--:--:--</span>
+    </div>
 </div>
-<div class="main">
-  <!-- 左面板 -->
-  <div class="side-panel">
-    <div class="panel-block">
-      <div class="block-label">ALTITUDE</div>
-      <div class="big-value" id="alt">0.0</div>
-      <div class="big-unit">METERS AGL</div>
-      <div class="bar-gauge"><div class="bar-fill" id="altBar" style="width:0%"></div></div>
-    </div>
-    <div class="panel-block">
-      <div class="block-label">GROUND SPEED</div>
-      <div class="big-value" id="spd">0.0</div>
-      <div class="big-unit">KM/H</div>
-      <div class="sub-value" id="vspd">↑ VSPD: 0.0 m/s</div>
-    </div>
-    <div class="panel-block">
-      <div class="block-label">G-FORCE</div>
-      <div class="big-value" id="acc">1.00</div>
-      <div class="big-unit">ACCELERATION</div>
-      <div class="sparkline-wrap"><canvas id="accSpark"></canvas></div>
-    </div>
-    <div class="panel-block" style="flex:1">
-      <div class="block-label">ATTITUDE</div>
-      <div class="horizon-widget">
-        <div class="hcw"><canvas id="horizonCanvas"></canvas></div>
-      </div>
-    </div>
-  </div>
-  <!-- 中间视频 -->
-  <div class="center">
-    <video id="videoFeed" autoplay playsinline muted></video>
-    <div class="video-placeholder" id="videoPlaceholder">
-      <svg width="52" height="52" viewBox="0 0 24 24" fill="none">
-        <path d="M2 8.5C5.5 5 9.5 3 12 3s6.5 2 10 5.5" stroke="#1a3a5a" stroke-width="1.5" stroke-linecap="round"/>
-        <path d="M5 11.5C7.5 9 9.8 8 12 8s4.5 1 7 3.5" stroke="#1a3a5a" stroke-width="1.5" stroke-linecap="round"/>
-        <path d="M8 14.5C9.5 13 10.8 12.5 12 12.5s2.5.5 4 2" stroke="#1a4a6a" stroke-width="1.5" stroke-linecap="round"/>
-        <circle cx="12" cy="17" r="1.5" fill="#1a5a7a"/>
-      </svg>
-      <div class="no-signal" id="noSigTxt">等待 iPhone 连接...</div>
-    </div>
-    <div class="video-overlay">
-      <div class="corner tl"></div><div class="corner tr"></div>
-      <div class="corner bl"></div><div class="corner br"></div>
-      <div class="crosshair"><div class="chd"></div></div>
-      <div class="horizon-overlay" id="horizonOverlay">
-        <div class="horizon-line"></div>
-        <div class="horizon-center"></div>
-        <div class="horizon-line"></div>
-      </div>
-      <div class="rec-badge"><div class="rec-dot"></div>REC</div>
-      <div class="telem-strip">
-        <div class="telem-item">PITCH <span id="pitchVal">+0.0°</span></div>
-        <div class="telem-item">ROLL <span id="rollVal">+0.0°</span></div>
-        <div class="telem-item">YAW <span id="yawVal">000°</span></div>
-        <div class="telem-item">ALT <span id="altVal2">0.0m</span></div>
-      </div>
-    </div>
-  </div>
-  <!-- 右面板 -->
-  <div class="side-panel right">
-    <div class="panel-block">
-      <div class="block-label">HEADING</div>
-      <div class="compass-wrap"><canvas id="compassCanvas" width="160" height="160"></canvas></div>
-      <div style="text-align:center;margin-top:3px">
-        <span style="font-family:'Orbitron',sans-serif;color:var(--cyan);font-size:18px" id="hdgVal">000°</span>
-        <span style="font-size:9px;color:#3a5a7a;margin-left:4px" id="hdgDir">N</span>
-      </div>
-    </div>
-    <div class="panel-block">
-      <div class="block-label">GPS</div>
-      <div style="font-size:10px;color:#5a8aaa;line-height:1.9">
-        <div>LAT <span style="color:var(--amber)" id="lat">---</span></div>
-        <div>LON <span style="color:var(--amber)" id="lon">---</span></div>
-        <div>ALT <span style="color:var(--amber)" id="gpsAlt">---</span> m</div>
-      </div>
-    </div>
-    <div class="panel-block">
-      <div class="block-label">ENVIRONMENT</div>
-      <div style="font-size:10px;color:#5a8aaa;line-height:1.9">
-        <div>TEMP &nbsp;<span style="color:var(--amber)" id="temp">--.-</span> °C</div>
-        <div>PRESS <span style="color:var(--amber)" id="press">----</span> hPa</div>
-      </div>
-    </div>
-    <div class="panel-block">
-      <div class="block-label">FLIGHT TIME</div>
-      <div class="big-value" id="flightTimer" style="font-size:20px">00:00:00</div>
-      <div class="big-unit">HH:MM:SS</div>
-      <div class="bar-gauge" style="margin-top:7px">
-        <div class="bar-fill warn" id="timeBar" style="width:0%"></div>
-      </div>
-    </div>
-    <div class="panel-block" style="flex:1">
-      <div class="block-label">LINK QUALITY</div>
-      <div style="font-size:10px;color:#5a8aaa;line-height:1.9">
-        <div>LATENCY <span style="color:var(--amber)" id="latency">---</span> ms</div>
-        <div>RECONNECT <span style="color:var(--amber)" id="reconCnt">0</span></div>
-        <div>STATUS <span style="color:var(--green)" id="linkStat">INIT</span></div>
-      </div>
-    </div>
-  </div>
+
+<div id="controls">
+    <!-- 这里保持原有按钮或控制界面 -->
 </div>
-<div class="bottom-bar">
-  <div class="coord-display"><div>DRONE <span>ND-7</span></div><div>PAYLOAD <span>iPhone CAM</span></div></div>
-  <div class="mission-status" id="missionTxt">■ STANDBY</div>
-  <div class="coord-display"><div>DIST <span id="dist">0m</span></div><div>SPD <span id="spdBot">0.0</span> km/h</div></div>
+
+<div id="videoContainer">
+    <div id="videoPlaceholder">摄像头预览区域</div>
+    <video id="videoFeed" autoplay playsinline></video>
 </div>
 
 <script>
-// ★ 域名已写好，不需要修改 ★
-const SERVER='wss://trace-light-drone-server.onrender.com';
+// ===== WebSocket 连接与断线重连 =====
+const SERVER = 'wss://trace-light-drone-server.onrender.com'; // 更新为实际服务器地址
+let ws = null;
+let reconnectDelay = 2000;
+let reconnectTimer = null;
 
-const ICE={iceServers:[
-  {urls:'stun:stun.l.google.com:19302'},
-  {urls:'stun:stun1.l.google.com:19302'},
-  {urls:'turn:openrelay.metered.ca:80',username:'openrelayproject',credential:'openrelayproject'},
-  {urls:'turn:openrelay.metered.ca:443',username:'openrelayproject',credential:'openrelayproject'},
-  {urls:'turn:openrelay.metered.ca:443?transport=tcp',username:'openrelayproject',credential:'openrelayproject'}
-]};
+function connectServer() {
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+    ws = new WebSocket(SERVER);
 
-const state={
-  pitch:0,roll:0,yaw:0,altitude:0,speed:0,vspeed:0,
-  gforce:1.0,heading:0,lat:null,lon:null,gpsAlt:null,
-  temp:22.5,pressure:1013.25,
-  flightSeconds:0,accHistory:new Array(60).fill(1.0)
-};
-let useSimulation=true;
-let ws_p,pc_p,reconnects=0,flightStart=null,pingTimer,lastPingTime,latencyMs=0;
+    ws.onopen = () => {
+        console.log('WebSocket 已连接');
+        document.getElementById('dotServer').classList.remove('off');
+        document.getElementById('dotServer').classList.add('on');
+        document.getElementById('lblServer').textContent = '服务器在线';
+        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    };
 
-// ── 时钟 ──
-setInterval(()=>{document.getElementById('clock').textContent=new Date().toTimeString().slice(0,8)},1000);
+    ws.onmessage = (msg) => {
+        console.log('收到消息:', msg.data);
+        // 可在这里处理服务器指令
+    };
 
-// ── 飞行计时 ──
-function updateFlightTimer(){
-  if(!flightStart)return;
-  state.flightSeconds=Math.floor((Date.now()-flightStart)/1000);
-  const h=Math.floor(state.flightSeconds/3600),m=Math.floor((state.flightSeconds%3600)/60),s=state.flightSeconds%60;
-  document.getElementById('flightTimer').textContent=
-    `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-  document.getElementById('timeBar').style.width=Math.min(100,(state.flightSeconds/1800)*100)+'%';
+    ws.onerror = (err) => { console.log('WebSocket 错误', err); };
+    ws.onclose = () => {
+        console.log('WebSocket 已断开，2秒后重连...');
+        document.getElementById('dotServer').classList.remove('on');
+        document.getElementById('dotServer').classList.add('off');
+        document.getElementById('lblServer').textContent = '服务器断开';
+        if (!reconnectTimer) {
+            reconnectTimer = setTimeout(connectServer, reconnectDelay);
+        }
+    };
 }
 
-// ── 模拟数据（iPhone未连接时显示） ──
-let t=0;
-function simulate(){
-  t+=0.016;
-  state.pitch=Math.sin(t*.3)*6;state.roll=Math.sin(t*.25+1)*10;
-  state.yaw=(state.yaw+.25+360)%360;state.heading=state.yaw;
-  state.altitude=25+Math.sin(t*.1)*5;state.speed=10+Math.sin(t*.2)*4;
-  state.gforce=1+Math.abs(Math.sin(t*.3)*.12);
-  state.accHistory.push(state.gforce);state.accHistory.shift();
-  state.temp=22.5+Math.sin(t*.05)*1;state.pressure=1013.25-state.altitude*.12;
-}
-
-// ── DOM更新 ──
-function updateDOM(){
-  const s=state;
-  document.getElementById('alt').textContent=s.altitude.toFixed(1);
-  document.getElementById('altBar').style.width=Math.min(100,(s.altitude/150)*100)+'%';
-  document.getElementById('altVal2').textContent=s.altitude.toFixed(1)+'m';
-  document.getElementById('spd').textContent=s.speed.toFixed(1);
-  document.getElementById('spdBot').textContent=s.speed.toFixed(1);
-  document.getElementById('vspd').textContent=(s.vspeed>=0?'↑':'↓')+' VSPD: '+Math.abs(s.vspeed).toFixed(1)+' m/s';
-  document.getElementById('acc').textContent=s.gforce.toFixed(2);
-  document.getElementById('pitchVal').textContent=(s.pitch>=0?'+':'')+s.pitch.toFixed(1)+'°';
-  document.getElementById('rollVal').textContent=(s.roll>=0?'+':'')+s.roll.toFixed(1)+'°';
-  document.getElementById('yawVal').textContent=String(Math.round(s.yaw)).padStart(3,'0')+'°';
-  document.getElementById('hdgVal').textContent=String(Math.round(s.heading)).padStart(3,'0')+'°';
-  document.getElementById('hdgDir').textContent=(['N','NE','E','SE','S','SW','W','NW'])[Math.round(s.heading/45)%8];
-  if(s.lat!=null){document.getElementById('lat').textContent=s.lat.toFixed(6);document.getElementById('lon').textContent=s.lon.toFixed(6);}
-  if(s.gpsAlt!=null)document.getElementById('gpsAlt').textContent=s.gpsAlt.toFixed(0);
-  document.getElementById('temp').textContent=s.temp.toFixed(1);
-  document.getElementById('press').textContent=s.pressure.toFixed(1);
-  document.getElementById('dist').textContent=Math.round(s.speed*s.flightSeconds/3600*1000)+'m';
-  document.getElementById('latency').textContent=latencyMs||'---';
-  document.getElementById('reconCnt').textContent=reconnects;
-  const ho=document.getElementById('horizonOverlay');
-  ho.style.transform=`translate(-50%,calc(-50% + ${-s.pitch*1.4}px)) rotate(${-s.roll}deg)`;
-  updateFlightTimer();
-}
-
-// ── 人工地平仪 ──
-const hC=document.getElementById('horizonCanvas');
-function drawHorizon(){
-  const p=hC.parentElement,sz=p.offsetWidth*.93;
-  hC.width=sz;hC.height=sz;
-  const ctx=hC.getContext('2d'),W=sz,cx=W/2,cy=W/2,r=W/2-3;
-  ctx.clearRect(0,0,W,W);
-  ctx.save();ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.clip();
-  const rr=(state.roll*Math.PI)/180,pp=(state.pitch/90)*r;
-  ctx.save();ctx.translate(cx,cy);ctx.rotate(rr);
-  const sg=ctx.createLinearGradient(0,-r+pp,0,pp);
-  sg.addColorStop(0,'#002850');sg.addColorStop(1,'#004880');
-  ctx.fillStyle=sg;ctx.fillRect(-r,-r+pp-W,r*2,W);
-  const gg=ctx.createLinearGradient(0,pp,0,r+pp);
-  gg.addColorStop(0,'#3a1e00');gg.addColorStop(1,'#180c00');
-  ctx.fillStyle=gg;ctx.fillRect(-r,pp,r*2,W);
-  ctx.strokeStyle='rgba(255,255,255,.8)';ctx.lineWidth=1.5;
-  ctx.beginPath();ctx.moveTo(-r,pp);ctx.lineTo(r,pp);ctx.stroke();
-  ctx.strokeStyle='rgba(255,255,255,.4)';ctx.lineWidth=.8;ctx.font=`${W*.055}px Share Tech Mono`;ctx.fillStyle='rgba(255,255,255,.4)';ctx.textAlign='center';
-  for(let d=-30;d<=30;d+=10){if(d===0)continue;const y=pp-(d/90)*r,w=Math.abs(d)===10?r*.22:r*.32;
-    ctx.beginPath();ctx.moveTo(-w,y);ctx.lineTo(w,y);ctx.stroke();ctx.fillText(Math.abs(d),w+W*.06,y+3);}
-  ctx.restore();
-  ctx.save();ctx.translate(cx,cy);
-  ctx.strokeStyle='rgba(0,212,255,.35)';ctx.lineWidth=.8;
-  ctx.beginPath();ctx.arc(0,0,r-7,-Math.PI*.75,-Math.PI*.25);ctx.stroke();
-  for(let a=-60;a<=60;a+=10){const rad=(a-90)*Math.PI/180;
-    ctx.strokeStyle=a===0?'rgba(0,212,255,.9)':'rgba(0,212,255,.35)';ctx.lineWidth=a===0?1.5:.7;
-    ctx.beginPath();ctx.moveTo(Math.cos(rad)*(r-13),Math.sin(rad)*(r-13));ctx.lineTo(Math.cos(rad)*(r-7),Math.sin(rad)*(r-7));ctx.stroke();}
-  ctx.rotate(rr);ctx.fillStyle='rgba(0,212,255,.85)';
-  ctx.beginPath();ctx.moveTo(0,-(r-7));ctx.lineTo(-4,-(r-18));ctx.lineTo(4,-(r-18));ctx.closePath();ctx.fill();
-  ctx.restore();
-  ctx.strokeStyle='rgba(245,166,35,.85)';ctx.lineWidth=1.8;
-  ctx.beginPath();
-  ctx.moveTo(cx-r*.33,cy);ctx.lineTo(cx-r*.14,cy);ctx.moveTo(cx-r*.14,cy);ctx.lineTo(cx,cy+r*.07);ctx.lineTo(cx+r*.14,cy);ctx.moveTo(cx+r*.14,cy);ctx.lineTo(cx+r*.33,cy);
-  ctx.moveTo(cx-r*.09,cy-r*.23);ctx.lineTo(cx+r*.09,cy-r*.23);ctx.stroke();
-  ctx.restore();
-  ctx.strokeStyle='#1a3a5a';ctx.lineWidth=3;ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.stroke();
-}
-
-// ── 罗盘 ──
-const cC=document.getElementById('compassCanvas');
-function drawCompass(){
-  const sz=cC.parentElement.offsetWidth*.93;cC.width=sz;cC.height=sz;
-  const ctx=cC.getContext('2d'),W=sz,cx=W/2,cy=W/2,r=W/2-5,hdg=state.heading;
-  ctx.clearRect(0,0,W,W);
-  const bg=ctx.createRadialGradient(cx,cy,0,cx,cy,r);bg.addColorStop(0,'#081420');bg.addColorStop(1,'#030810');
-  ctx.fillStyle=bg;ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fill();
-  ctx.strokeStyle='#1a3a5a';ctx.lineWidth=2;ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.stroke();
-  ctx.save();ctx.translate(cx,cy);ctx.rotate(-hdg*Math.PI/180);
-  const dirs=['N','NE','E','SE','S','SW','W','NW'];
-  for(let i=0;i<360;i+=5){
-    const rad=i*Math.PI/180,iM=i%45===0,im=i%10===0;
-    const inn=iM?r*.62:im?r*.73:r*.81;
-    ctx.strokeStyle=iM?'rgba(0,212,255,.8)':'rgba(0,212,255,.22)';ctx.lineWidth=iM?1.5:.5;
-    ctx.beginPath();ctx.moveTo(Math.sin(rad)*inn,-Math.cos(rad)*inn);ctx.lineTo(Math.sin(rad)*(r-4),-Math.cos(rad)*(r-4));ctx.stroke();
-    if(iM){const lb=dirs[i/45],fr=r*.54;ctx.fillStyle=lb==='N'?'#ff3b3b':'rgba(0,212,255,.8)';ctx.font=`bold ${W*.075}px Orbitron`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(lb,Math.sin(rad)*fr,-Math.cos(rad)*fr);}
-  }
-  ctx.restore();
-  ctx.fillStyle='#ff3b3b';ctx.beginPath();ctx.moveTo(cx,cy-r+2);ctx.lineTo(cx-4,cy-r+11);ctx.lineTo(cx+4,cy-r+11);ctx.closePath();ctx.fill();
-  const dg=ctx.createRadialGradient(cx,cy,0,cx,cy,7);dg.addColorStop(0,'rgba(0,212,255,.7)');dg.addColorStop(1,'transparent');
-  ctx.fillStyle=dg;ctx.beginPath();ctx.arc(cx,cy,7,0,Math.PI*2);ctx.fill();
-}
-
-// ── 加速度折线 ──
-const spC=document.getElementById('accSpark');
-function drawSpark(){
-  const W=spC.parentElement.offsetWidth,H=38;spC.width=W;spC.height=H;
-  const ctx=spC.getContext('2d'),data=state.accHistory,mn=0.8,mx=1.5,dx=W/(data.length-1);
-  ctx.clearRect(0,0,W,H);
-  const gr=ctx.createLinearGradient(0,0,0,H);gr.addColorStop(0,'rgba(0,212,255,.28)');gr.addColorStop(1,'rgba(0,212,255,0)');
-  ctx.fillStyle=gr;ctx.beginPath();
-  data.forEach((v,i)=>{const x=i*dx,y=H-((v-mn)/(mx-mn))*H;i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});
-  ctx.lineTo(W,H);ctx.closePath();ctx.fill();
-  ctx.strokeStyle='rgba(0,212,255,.8)';ctx.lineWidth=1.5;ctx.beginPath();
-  data.forEach((v,i)=>{const x=i*dx,y=H-((v-mn)/(mx-mn))*H;i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});
-  ctx.stroke();
-}
-
-// ── WebSocket + WebRTC ──
-function connectPad(){
-  try{ws_p=new WebSocket(SERVER)}catch(e){setTimeout(connectPad,4000);return}
-
-  ws_p.onopen=()=>{
-    ws_p.send(JSON.stringify({type:'ipad-hello'}));
-    setDot('dotServer','green');
-    document.getElementById('linkStat').textContent='ONLINE';
-    document.getElementById('linkStat').style.color='var(--green)';
-    // 延迟测量ping
-    clearInterval(pingTimer);
-    pingTimer=setInterval(()=>{
-      if(ws_p.readyState===1){lastPingTime=Date.now();ws_p.send(JSON.stringify({type:'ping'}));}
-    },2000);
-  };
-
-  ws_p.onmessage=async(e)=>{
-    let msg;try{msg=JSON.parse(e.data)}catch{return}
-
-    if(msg.type==='pong'){latencyMs=Date.now()-lastPingTime;document.getElementById('latency').textContent=latencyMs;}
-
-    if(msg.type==='iphone-online'){
-      setDot('dotPhone','green');
-      document.getElementById('lblPhone').textContent='iPhone在线';
-      document.getElementById('missionTxt').textContent='■ MISSION ACTIVE';
-      if(!flightStart)flightStart=Date.now();
-      ws_p.send(JSON.stringify({type:'ipad-request-offer'}));
-      setupPC();
+// ===== 摄像头初始化 =====
+async function initVideo() {
+    try {
+        const videoEl = document.getElementById('videoFeed');
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        videoEl.srcObject = stream;
+        videoEl.style.display = 'block';
+        document.getElementById('videoPlaceholder').style.display = 'none';
+        document.getElementById('dotVideo').classList.remove('off');
+        document.getElementById('dotVideo').classList.add('on');
+        document.getElementById('lblVideo').textContent = '视频已启用';
+    } catch (e) {
+        console.warn('无法访问摄像头:', e);
+        document.getElementById('dotVideo').classList.remove('on');
+        document.getElementById('dotVideo').classList.add('off');
+        document.getElementById('lblVideo').textContent = '视频禁用';
     }
-
-    if(msg.type==='iphone-offline'){
-      setDot('dotPhone','off');setDot('dotVideo','off');
-      document.getElementById('lblPhone').textContent='iPhone离线';
-      document.getElementById('noSigTxt').textContent='iPhone 信号丢失，等待重连...';
-      document.getElementById('videoFeed').style.display='none';
-      document.getElementById('videoPlaceholder').style.display='flex';
-      useSimulation=true;
-    }
-
-    if(msg.type==='offer'){
-      if(!pc_p)setupPC();
-      await pc_p.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-      const ans=await pc_p.createAnswer();
-      await pc_p.setLocalDescription(ans);
-      ws_p.send(JSON.stringify({type:'answer',sdp:pc_p.localDescription}));
-    }
-
-    if(msg.type==='ice-phone'){pc_p?.addIceCandidate(new RTCIceCandidate(msg.candidate)).catch(()=>{});}
-
-    if(msg.type==='sensors'){
-      const d=msg.data;
-      useSimulation=false;
-      state.pitch=d.pitch;state.roll=d.roll;
-      state.heading=d.heading;state.yaw=d.heading;
-      state.gforce=d.gforce;state.speed=d.speed;
-      if(d.altitude!=null)state.altitude=d.altitude;
-      if(d.gpsAlt!=null)state.gpsAlt=d.gpsAlt;
-      if(d.lat!=null){state.lat=d.lat;state.lon=d.lon;}
-      state.accHistory.push(d.gforce);state.accHistory.shift();
-    }
-  };
-
-  ws_p.onclose=()=>{
-    clearInterval(pingTimer);
-    reconnects++;
-    setDot('dotServer','warn');
-    document.getElementById('linkStat').textContent='RECONNECTING';
-    document.getElementById('linkStat').style.color='var(--amber)';
-    setTimeout(connectPad,Math.min(16000,1000*Math.pow(2,Math.min(reconnects-1,4))));
-  };
-  ws_p.onerror=()=>{};
 }
 
-function setupPC(){
-  if(pc_p)pc_p.close();
-  pc_p=new RTCPeerConnection(ICE);
-  pc_p.onicecandidate=(e)=>{
-    if(e.candidate&&ws_p.readyState===1)ws_p.send(JSON.stringify({type:'ice-pad',candidate:e.candidate}));
-  };
-  pc_p.ontrack=(e)=>{
-    const v=document.getElementById('videoFeed');
-    v.srcObject=e.streams[0];v.style.display='block';
-    document.getElementById('videoPlaceholder').style.display='none';
-    setDot('dotVideo','green');
-    document.getElementById('lblVideo').textContent='视频正常';
-  };
-  pc_p.onconnectionstatechange=()=>{
-    const s=pc_p.connectionState;
-    if(s==='failed'){setDot('dotVideo','off');setTimeout(()=>{setupPC();ws_p.send(JSON.stringify({type:'ipad-request-offer'}));},2000);}
-    if(s==='disconnected')setDot('dotVideo','warn');
-  };
-}
+// ===== 页面加载 =====
+window.addEventListener('load', () => {
+    connectServer();
+    initVideo();
 
-function setDot(id,state){
-  const d=document.getElementById(id);
-  d.className='dot'+(state==='warn'?' warn':state==='off'?' off':'');
-}
-
-// ── 主循环 ──
-function loop(){
-  if(useSimulation)simulate();
-  updateDOM();drawHorizon();drawCompass();drawSpark();
-  requestAnimationFrame(loop);
-}
-
-connectPad();
-loop();
+    // 时钟更新
+    setInterval(() => {
+        const now = new Date();
+        document.getElementById('clock').textContent = now.toLocaleTimeString();
+    }, 1000);
+});
 </script>
 </body>
 </html>

@@ -192,12 +192,11 @@ canvas{display:block}
 const SERVER='wss://trace-light-drone-server.onrender.com';
 const ICE={iceServers:[
   {urls:'stun:stun.l.google.com:19302'},
-  {urls:'stun:stun1.l.google.com:19302'},
-  {urls:'turn:openrelay.metered.ca:80',username:'openrelayproject',credential:'openrelayproject'},
-  {urls:'turn:openrelay.metered.ca:443',username:'openrelayproject',credential:'openrelayproject'},
-  {urls:'turn:openrelay.metered.ca:443?transport=tcp',username:'openrelayproject',credential:'openrelayproject'}
+  {urls:'stun:stun.cloudflare.com:3478'},
+  {urls:'turn:turn.cloudflare.com:3478',username:'openrelayproject',credential:'openrelayproject'},
+  {urls:'turn:fr-turn.xirsys.com:80?transport=udp',username:'openrelayproject',credential:'openrelayproject'},
+  {urls:'turn:fr-turn.xirsys.com:443?transport=tcp',username:'openrelayproject',credential:'openrelayproject'}
 ]};
-
 const state={
   pitch:0,roll:0,yaw:0,altitude:0,speed:0,vspeed:0,
   gforce:1.0,heading:0,lat:null,lon:null,gpsAlt:null,

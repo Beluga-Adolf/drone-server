@@ -32,8 +32,11 @@ video{width:100%;border-radius:8px;margin-top:14px;border:1px solid #003020}
 · 允许位置权限<br>
 · 设置→显示与亮度→自动锁定→永不
 </div>
+
 <script>
-const SERVER='wss://https://trace-light-drone-server.onrender.com';
+// ✅ 改正 WebSocket URL
+const SERVER='wss://trace-light-drone-server.onrender.com';
+
 const ICE={iceServers:[
   {urls:'stun:stun.l.google.com:19302'},
   {urls:'stun:stun1.l.google.com:19302'},
@@ -41,8 +44,10 @@ const ICE={iceServers:[
   {urls:'turn:openrelay.metered.ca:443',username:'openrelayproject',credential:'openrelayproject'},
   {urls:'turn:openrelay.metered.ca:443?transport=tcp',username:'openrelayproject',credential:'openrelayproject'}
 ]};
-let ws,pc,stream,retries=0,sensorTimer;
+
+let ws, pc, stream, retries=0, sensorTimer;
 const sensor={pitch:0,roll:0,heading:0,gforce:1,speed:0,altitude:null,lat:null,lon:null};
+
 function set(id,html){document.getElementById(id).innerHTML=html}
 function ok(t){return`<span class="ok">✓ ${t}</span>`}
 function err(t){return`<span class="err">✗ ${t}</span>`}
@@ -70,17 +75,19 @@ function connectWS(){
   };
   ws.onerror=()=>{};
 }
+
 function scheduleReconnect(){
   retries++;
   set('s6',retries);
   setTimeout(connectWS,Math.min(16000,1000*Math.pow(2,Math.min(retries-1,4))));
 }
+
 async function createOffer(){
   if(pc)pc.close();
   pc=new RTCPeerConnection(ICE);
   stream.getTracks().forEach(t=>pc.addTrack(t,stream));
   pc.onicecandidate=(e)=>{
-    if(e.candidate&&ws.readyState===1)
+    if(e.candidate && ws.readyState===1)
       ws.send(JSON.stringify({type:'ice-phone',candidate:e.candidate}));
   };
   pc.onconnectionstatechange=()=>{
@@ -94,9 +101,11 @@ async function createOffer(){
   await pc.setLocalDescription(offer);
   ws.send(JSON.stringify({type:'offer',sdp:pc.localDescription}));
 }
+
 function sendSensors(){
   if(ws?.readyState===1)ws.send(JSON.stringify({type:'sensors',data:sensor}));
 }
+
 async function startAll(){
   document.getElementById('btn').disabled=true;
   document.getElementById('btn').textContent='启动中...';
@@ -135,6 +144,9 @@ async function startAll(){
   document.getElementById('btn').textContent='✓ 运行中';
   connectWS();
 }
+
+// 启动按钮允许点击
+document.getElementById('btn').disabled=false;
 </script>
 </body>
 </html>

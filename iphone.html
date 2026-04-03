@@ -24,7 +24,7 @@ video{width:100%;border-radius:8px;margin-top:14px;border:1px solid #003020}
 <div class="row"><span class="label">iPad在线</span><span id="s4"><span class="wait">等待中</span></span></div>
 <div class="row"><span class="label">视频推流</span><span id="s5"><span class="wait">未开始</span></span></div>
 <div class="row"><span class="label">重连次数</span><span id="s6">0</span></div>
-<button class="btn" id="btn" onclick="startAll()" disabled>▶ 启动</button>
+<button class="btn" id="btn" onclick="startAll()">▶ 启动</button>
 <video id="v" autoplay muted playsinline></video>
 <div class="warn">
 ⚠️ 必须用 Safari 打开<br>
@@ -33,7 +33,7 @@ video{width:100%;border-radius:8px;margin-top:14px;border:1px solid #003020}
 · 设置→显示与亮度→自动锁定→永不
 </div>
 <script>
-const SERVER='wss://trace-light-drone-server.onrender.com'; 
+const SERVER='wss://trace-light-drone-server.onrender.com';
 const ICE={iceServers:[
   {urls:'stun:stun.l.google.com:19302'},
   {urls:'stun:stun1.l.google.com:19302'},
@@ -47,6 +47,9 @@ function set(id,html){document.getElementById(id).innerHTML=html}
 function ok(t){return`<span class="ok">✓ ${t}</span>`}
 function err(t){return`<span class="err">✗ ${t}</span>`}
 function wait(t){return`<span class="wait">${t}</span>`}
+
+// 页面加载后立刻连接服务器
+window.onload=()=>connectWS();
 
 function connectWS(){
   try{ws=new WebSocket(SERVER)}catch(e){scheduleReconnect();return}
@@ -70,11 +73,13 @@ function connectWS(){
   };
   ws.onerror=()=>{};
 }
+
 function scheduleReconnect(){
   retries++;
   set('s6',retries);
   setTimeout(connectWS,Math.min(16000,1000*Math.pow(2,Math.min(retries-1,4))));
 }
+
 async function createOffer(){
   if(pc)pc.close();
   pc=new RTCPeerConnection(ICE);
@@ -94,9 +99,11 @@ async function createOffer(){
   await pc.setLocalDescription(offer);
   ws.send(JSON.stringify({type:'offer',sdp:pc.localDescription}));
 }
+
 function sendSensors(){
   if(ws?.readyState===1)ws.send(JSON.stringify({type:'sensors',data:sensor}));
 }
+
 async function startAll(){
   document.getElementById('btn').disabled=true;
   document.getElementById('btn').textContent='启动中...';
@@ -133,7 +140,6 @@ async function startAll(){
   },null,{enableHighAccuracy:true,maximumAge:500,timeout:8000});
   set('s3',ok('陀螺仪+GPS'));
   document.getElementById('btn').textContent='✓ 运行中';
-  connectWS();
 }
 </script>
 </body>

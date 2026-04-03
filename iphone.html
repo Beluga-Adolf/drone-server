@@ -2,117 +2,139 @@
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>TRACE AERIAL · COCKPIT</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>飞行端</title>
 <style>
-/* 保持原样式不变 */
-@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
-:root{--amber:#f5a623;--amber-dim:#7a530f;--green:#00ff88;--red:#ff3b3b;--cyan:#00d4ff;--bg:#070a0e;--panel:#0b1018;--border:#1a2a3a}
-*{margin:0;padding:0;box-sizing:border-box}
-body{background:var(--bg);color:var(--amber);font-family:'Share Tech Mono',monospace;width:100vw;height:100vh;overflow:hidden;display:flex;flex-direction:column}
-body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.13) 2px,rgba(0,0,0,0.13) 4px);pointer-events:none;z-index:1000}
-body::after{content:'';position:fixed;inset:0;background:radial-gradient(ellipse at center,transparent 60%,rgba(0,0,0,0.65) 100%);pointer-events:none;z-index:999}
-/* 其他 CSS 全部保持原样，这里省略 */
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#050e08;color:#00ff88;font-family:'Courier New',monospace;padding:24px 20px;min-height:100vh}
+h2{font-size:12px;letter-spacing:4px;color:#00cc66;margin-bottom:20px;border-bottom:1px solid #003020;padding-bottom:12px}
+.row{display:flex;justify-content:space-between;padding:11px 0;border-bottom:1px solid #001a10;font-size:13px}
+.label{color:#336644}.ok{color:#00ff88}.err{color:#ff4444}.wait{color:#ffaa00}
+.btn{width:100%;padding:18px;background:#001a10;border:2px solid #00ff88;color:#00ff88;font-size:16px;letter-spacing:2px;border-radius:10px;margin-top:20px;font-family:'Courier New',monospace}
+.btn:disabled{opacity:.3}
+video{width:100%;border-radius:8px;margin-top:14px;border:1px solid #003020}
+.warn{background:#1a0800;border:1px solid #ff6600;color:#ff9944;border-radius:8px;padding:12px;font-size:12px;line-height:1.9;margin-top:16px}
 </style>
 </head>
 <body>
-<div class="scan-line"></div>
-<div class="top-bar">
-  <div class="logo">TRACE AERIAL</div>
-  <div class="status-row">
-    <div class="status-item"><div class="dot" id="dotServer"></div><span id="lblServer">服务器</span></div>
-    <div class="status-item"><div class="dot off" id="dotPhone"></div><span id="lblPhone">iPhone离线</span></div>
-    <div class="status-item"><div class="dot off" id="dotVideo"></div><span id="lblVideo">视频</span></div>
-  </div>
-  <div class="clock" id="clock">--:--:--</div>
+<h2>TRACE AERIAL · 飞行端</h2>
+<div class="row"><span class="label">服务器</span><span id="s1"><span class="wait">连接中...</span></span></div>
+<div class="row"><span class="label">摄像头</span><span id="s2"><span class="wait">未启动</span></span></div>
+<div class="row"><span class="label">传感器</span><span id="s3"><span class="wait">未启动</span></span></div>
+<div class="row"><span class="label">iPad在线</span><span id="s4"><span class="wait">等待中</span></span></div>
+<div class="row"><span class="label">视频推流</span><span id="s5"><span class="wait">未开始</span></span></div>
+<div class="row"><span class="label">重连次数</span><span id="s6">0</span></div>
+<button class="btn" id="btn" onclick="startAll()" disabled>▶ 启动</button>
+<video id="v" autoplay muted playsinline></video>
+<div class="warn">
+⚠️ 必须用 Safari 打开<br>
+· 允许摄像头权限<br>
+· 允许位置权限<br>
+· 设置→显示与亮度→自动锁定→永不
 </div>
-
-<!-- main, side-panel, center, right-panel 保持原样，这里省略 -->
-
-<div class="bottom-bar">
-  <div class="coord-display"><div>DRONE <span>ND-7</span></div><div>PAYLOAD <span>iPhone CAM</span></div></div>
-  <div class="mission-status" id="missionTxt">■ STANDBY</div>
-  <div class="coord-display"><div>DIST <span id="dist">0m</span></div><div>SPD <span id="spdBot">0.0</span> km/h</div></div>
-</div>
-
 <script>
-const SERVER='wss://trace-light-drone-server.onrender.com'; // ⚡ 确保 WSS 地址 HTTPS
+const SERVER='wss://https://trace-light-drone-server.onrender.com';
+const ICE={iceServers:[
+  {urls:'stun:stun.l.google.com:19302'},
+  {urls:'stun:stun1.l.google.com:19302'},
+  {urls:'turn:openrelay.metered.ca:80',username:'openrelayproject',credential:'openrelayproject'},
+  {urls:'turn:openrelay.metered.ca:443',username:'openrelayproject',credential:'openrelayproject'},
+  {urls:'turn:openrelay.metered.ca:443?transport=tcp',username:'openrelayproject',credential:'openrelayproject'}
+]};
+let ws,pc,stream,retries=0,sensorTimer;
+const sensor={pitch:0,roll:0,heading:0,gforce:1,speed:0,altitude:null,lat:null,lon:null};
+function set(id,html){document.getElementById(id).innerHTML=html}
+function ok(t){return`<span class="ok">✓ ${t}</span>`}
+function err(t){return`<span class="err">✗ ${t}</span>`}
+function wait(t){return`<span class="wait">${t}</span>`}
 
-let ws=null;
-let reconnectDelay=2000;
-let maxReconnect=10;
-let reconnectCount=0;
-
-// 更新时钟
-setInterval(()=>{document.getElementById('clock').textContent=new Date().toTimeString().slice(0,8)},1000);
-
-// 飞行计时
-let flightStart=null;
-function updateFlightTimer(){
-  if(!flightStart)return;
-  let seconds=Math.floor((Date.now()-flightStart)/1000);
-  const h=Math.floor(seconds/3600),m=Math.floor((seconds%3600)/60),s=seconds%60;
-  document.getElementById('flightTimer').textContent=`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-  document.getElementById('timeBar').style.width=Math.min(100,(seconds/1800)*100)+'%';
-}
-
-// 自动连接 WSS
-function connectServer(){
-  if(ws && (ws.readyState===WebSocket.OPEN || ws.readyState===WebSocket.CONNECTING)) return;
-
-  ws=new WebSocket(SERVER);
-
+function connectWS(){
+  try{ws=new WebSocket(SERVER)}catch(e){scheduleReconnect();return}
   ws.onopen=()=>{
-    reconnectCount=0;
-    flightStart=new Date();
-    document.getElementById('dotServer').classList.remove('off');
-    document.getElementById('lblServer').textContent='已连接';
-    console.log('WebSocket 连接成功');
+    retries=0;
+    set('s1',ok('已连接'));
+    ws.send(JSON.stringify({type:'iphone-hello'}));
+    clearInterval(sensorTimer);
+    sensorTimer=setInterval(sendSensors,100);
   };
-
-  ws.onmessage=(evt)=>{
-    // ⚡这里你原来解析 JSON 数据的逻辑不变
-    console.log('收到数据', evt.data);
+  ws.onmessage=(e)=>{
+    let msg;try{msg=JSON.parse(e.data)}catch{return}
+    if(msg.type==='ipad-request-offer')createOffer();
+    if(msg.type==='answer')pc?.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+    if(msg.type==='ice-pad')pc?.addIceCandidate(new RTCIceCandidate(msg.candidate)).catch(()=>{});
   };
-
-  ws.onclose=(evt)=>{
-    document.getElementById('dotServer').classList.add('off');
-    document.getElementById('lblServer').textContent='断线重连…';
-    if(reconnectCount<maxReconnect){
-      reconnectCount++;
-      console.log(`尝试第 ${reconnectCount} 次重连`);
-      setTimeout(connectServer,reconnectDelay);
-    } else {
-      console.warn('达到最大重连次数，请检查网络或服务器');
-    }
+  ws.onclose=()=>{
+    set('s1',wait('断线重连...'));
+    clearInterval(sensorTimer);
+    scheduleReconnect();
   };
-
-  ws.onerror=(err)=>{
-    console.error('WebSocket 错误', err);
-    ws.close();
-  };
+  ws.onerror=()=>{};
 }
-
-// 请求摄像头权限
-async function requestCamera(){
+function scheduleReconnect(){
+  retries++;
+  set('s6',retries);
+  setTimeout(connectWS,Math.min(16000,1000*Math.pow(2,Math.min(retries-1,4))));
+}
+async function createOffer(){
+  if(pc)pc.close();
+  pc=new RTCPeerConnection(ICE);
+  stream.getTracks().forEach(t=>pc.addTrack(t,stream));
+  pc.onicecandidate=(e)=>{
+    if(e.candidate&&ws.readyState===1)
+      ws.send(JSON.stringify({type:'ice-phone',candidate:e.candidate}));
+  };
+  pc.onconnectionstatechange=()=>{
+    const s=pc.connectionState;
+    if(s==='connected')set('s5',ok('推流中'));
+    if(s==='disconnected')set('s5',wait('中断，等待重连'));
+    if(s==='failed'){set('s5',err('重建中...'));setTimeout(createOffer,2000);}
+  };
+  set('s4',ok('iPad已连接'));
+  const offer=await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  ws.send(JSON.stringify({type:'offer',sdp:pc.localDescription}));
+}
+function sendSensors(){
+  if(ws?.readyState===1)ws.send(JSON.stringify({type:'sensors',data:sensor}));
+}
+async function startAll(){
+  document.getElementById('btn').disabled=true;
+  document.getElementById('btn').textContent='启动中...';
   try{
-    const stream=await navigator.mediaDevices.getUserMedia({video:true,audio:false});
-    const video=document.getElementById('videoFeed');
-    video.srcObject=stream;
-    video.style.display='block';
-    document.getElementById('videoPlaceholder').style.display='none';
-    document.getElementById('dotPhone').classList.remove('off');
-    document.getElementById('lblPhone').textContent='iPhone在线';
+    stream=await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}},
+      audio:false
+    });
+    document.getElementById('v').srcObject=stream;
+    set('s2',ok('后置摄像头'));
   }catch(e){
-    console.warn('摄像头权限被拒绝或不可用',e);
+    set('s2',err(e.message));
+    document.getElementById('btn').disabled=false;
+    document.getElementById('btn').textContent='重试';
+    return;
   }
+  if(typeof DeviceMotionEvent?.requestPermission==='function'){
+    try{await DeviceMotionEvent.requestPermission()}catch{}
+  }
+  window.addEventListener('deviceorientation',(e)=>{
+    sensor.pitch=+(e.beta??0).toFixed(1);
+    sensor.roll=+(e.gamma??0).toFixed(1);
+    sensor.heading=Math.round(e.alpha??0);
+  },true);
+  window.addEventListener('devicemotion',(e)=>{
+    const a=e.accelerationIncludingGravity;
+    if(a)sensor.gforce=+(Math.sqrt((a.x??0)**2+(a.y??0)**2+(a.z??0)**2)/9.81).toFixed(2);
+  },true);
+  navigator.geolocation?.watchPosition((p)=>{
+    sensor.lat=p.coords.latitude;
+    sensor.lon=p.coords.longitude;
+    sensor.altitude=p.coords.altitude??null;
+    sensor.speed=+((p.coords.speed??0)*3.6).toFixed(1);
+  },null,{enableHighAccuracy:true,maximumAge:500,timeout:8000});
+  set('s3',ok('陀螺仪+GPS'));
+  document.getElementById('btn').textContent='✓ 运行中';
+  connectWS();
 }
-
-// 初始化
-window.addEventListener('load',()=>{
-  connectServer();
-  requestCamera();
-});
 </script>
 </body>
 </html>

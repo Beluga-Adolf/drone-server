@@ -23,6 +23,7 @@ video{width:100%;border-radius:8px;margin-top:14px;border:1px solid #003020}
 <div class="row"><span class="label">iPad在线</span><span id="s4"><span class="wait">等待中</span></span></div>
 <div class="row"><span class="label">推流帧率</span><span id="s5"><span class="wait">--</span></span></div>
 <div class="row"><span class="label">重连次数</span><span id="s6">0</span></div>
+<div class="row"><span class="label">调试日志</span><span id="dbg" style="font-size:11px;color:#5a8a6a;max-width:60%;text-align:right">-</span></div>
 <button class="btn" id="btn" onclick="startAll()">▶ 启动</button>
 <video id="v" autoplay muted playsinline></video>
 <div class="warn">
@@ -42,57 +43,69 @@ function set(id,html){document.getElementById(id).innerHTML=html}
 function ok(t){return`<span class="ok">✓ ${t}</span>`}
 function err(t){return`<span class="err">✗ ${t}</span>`}
 function wait(t){return`<span class="wait">${t}</span>`}
+function dbg(t){document.getElementById('dbg').textContent=t;console.log('[DBG]',t)}
 
-window.onload=()=>connectWS();
-
-function connectWS(){
-  try{ws=new WebSocket(SERVER)}catch(e){scheduleReconnect();return}
-  ws.onopen=()=>{
-    retries=0;
-    set('s1',ok('已连接'));
-    ws.send(JSON.stringify({type:'iphone-hello'}));
-    ws.onopen=()=>{
-    retries=0;
-    set('s1',ok('已连接'));
-    ws.send(JSON.stringify({type:'iphone-hello'}));
-    alert('已发送 iphone-hello'); // 调试用
-    clearInterval(sensorTimer);
-    sensorTimer=setInterval(sendSensors,100);
+window.onload=()=>{
+  dbg('页面加载，开始连接...');
+  connectWS();
 };
 
+function connectWS(){
+  dbg('正在创建WebSocket...');
+  try{
+    ws=new WebSocket(SERVER);
+    dbg('WebSocket已创建，等待连接');
+  }catch(e){
+    dbg('创建失败:'+e.message);
+    scheduleReconnect();
+    return;
+  }
+
+  ws.onopen=()=>{
+    retries=0;
+    dbg('onopen触发！发送iphone-hello');
+    set('s1',ok('已连接'));
+    ws.send(JSON.stringify({type:'iphone-hello'}));
     clearInterval(sensorTimer);
     sensorTimer=setInterval(sendSensors,100);
   };
+
   ws.onmessage=(e)=>{
-    let msg;try{msg=JSON.parse(e.data)}catch{return}
-    if(msg.type==='ipad-hello'||msg.type==='iphone-online')return;
-    if(msg.type==='ipad-online'){
-      set('s4',ok('iPad已连接'));
-    }
+    let msg;
+    try{msg=JSON.parse(e.data)}catch{return}
+    dbg('收到消息:'+msg.type);
+    if(msg.type==='ipad-online'||msg.type==='iphone-online')return;
   };
-  ws.onclose=()=>{
+
+  ws.onclose=(e)=>{
+    dbg('连接关闭 code:'+e.code+' reason:'+e.reason);
     set('s1',wait('断线重连...'));
     clearInterval(sensorTimer);
     clearInterval(frameTimer);
+    clearInterval(fpsTimer);
     scheduleReconnect();
   };
-  ws.onerror=()=>{};
+
+  ws.onerror=(e)=>{
+    dbg('WebSocket错误');
+    set('s1',err('连接错误'));
+  };
 }
 
 function scheduleReconnect(){
   retries++;
   set('s6',retries);
-  setTimeout(connectWS,Math.min(16000,1000*Math.pow(2,Math.min(retries-1,4))));
+  const delay=Math.min(16000,1000*Math.pow(2,Math.min(retries-1,4)));
+  dbg('将在'+delay+'ms后重连');
+  setTimeout(connectWS,delay);
 }
 
-// 抓帧并发送
 function startFrameLoop(){
   const video=document.getElementById('v');
-  // 分辨率：宽640，高按比例
   canvas.width=640;
   canvas.height=360;
+  frameCount=0;
 
-  // FPS计数
   fpsTimer=setInterval(()=>{
     set('s5',ok(frameCount+' fps'));
     frameCount=0;
@@ -101,11 +114,10 @@ function startFrameLoop(){
   frameTimer=setInterval(()=>{
     if(ws?.readyState!==1||video.readyState<2)return;
     ctx2d.drawImage(video,0,0,640,360);
-    // 质量0.5，在带宽和画质间取平衡
     const jpeg=canvas.toDataURL('image/jpeg',0.5);
     ws.send(JSON.stringify({type:'frame',data:jpeg}));
     frameCount++;
-  }, 100); // 10fps，4G足够流畅
+  },100);
 }
 
 function sendSensors(){
@@ -115,6 +127,8 @@ function sendSensors(){
 async function startAll(){
   document.getElementById('btn').disabled=true;
   document.getElementById('btn').textContent='启动中...';
+  dbg('启动摄像头...');
+
   try{
     stream=await navigator.mediaDevices.getUserMedia({
       video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}},
@@ -122,25 +136,33 @@ async function startAll(){
     });
     document.getElementById('v').srcObject=stream;
     set('s2',ok('后置摄像头'));
+    dbg('摄像头已启动');
   }catch(e){
     set('s2',err(e.message));
+    dbg('摄像头失败:'+e.message);
     document.getElementById('btn').disabled=false;
     document.getElementById('btn').textContent='重试';
     return;
   }
 
   if(typeof DeviceMotionEvent?.requestPermission==='function'){
-    try{await DeviceMotionEvent.requestPermission()}catch{}
+    try{
+      const r=await DeviceMotionEvent.requestPermission();
+      dbg('传感器权限:'+r);
+    }catch(e){dbg('传感器权限异常:'+e.message);}
   }
+
   window.addEventListener('deviceorientation',(e)=>{
     sensor.pitch=+(e.beta??0).toFixed(1);
     sensor.roll=+(e.gamma??0).toFixed(1);
     sensor.heading=Math.round(e.alpha??0);
   },true);
+
   window.addEventListener('devicemotion',(e)=>{
     const a=e.accelerationIncludingGravity;
     if(a)sensor.gforce=+(Math.sqrt((a.x??0)**2+(a.y??0)**2+(a.z??0)**2)/9.81).toFixed(2);
   },true);
+
   navigator.geolocation?.watchPosition((p)=>{
     sensor.lat=p.coords.latitude;
     sensor.lon=p.coords.longitude;
@@ -150,9 +172,10 @@ async function startAll(){
 
   set('s3',ok('陀螺仪+GPS'));
   document.getElementById('btn').textContent='✓ 运行中';
+  dbg('等待视频就绪...');
 
-  // 等视频就绪后开始推帧
   document.getElementById('v').onloadedmetadata=()=>{
+    dbg('视频就绪，开始推帧');
     startFrameLoop();
   };
 }

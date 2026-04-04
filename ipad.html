@@ -63,14 +63,26 @@ canvas{display:block}
 .coord-display{font-size:10px;color:#3a6a9a;letter-spacing:1px;display:flex;gap:16px}
 .coord-display span{color:#5a8aaa}
 .mission-status{font-family:'Orbitron',sans-serif;font-size:9px;letter-spacing:3px;color:var(--green);text-shadow:0 0 8px var(--green);animation:flicker 4s ease-in-out infinite}
+#alarmOverlay{position:fixed;inset:0;z-index:5000;display:none;pointer-events:none;animation:alarmFlash .5s ease-in-out infinite}
+#alarmOverlay.attitude{background:rgba(255,59,59,0.18)}
+#alarmOverlay.disconnect{background:rgba(255,140,0,0.18)}
+#alarmBanner{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:5001;display:none;font-family:'Orbitron',sans-serif;font-size:20px;font-weight:900;letter-spacing:4px;text-align:center;padding:16px 32px;border-radius:8px;pointer-events:none;white-space:pre-line}
+#alarmBanner.attitude{color:#ff3b3b;border:2px solid #ff3b3b;background:rgba(10,0,0,0.88);text-shadow:0 0 20px #ff3b3b;box-shadow:0 0 40px rgba(255,59,59,0.5);animation:alarmFlash .4s ease-in-out infinite}
+#alarmBanner.disconnect{color:#ffaa00;border:2px solid #ffaa00;background:rgba(10,6,0,0.88);text-shadow:0 0 20px #ffaa00;box-shadow:0 0 40px rgba(255,170,0,0.5);animation:alarmFlash .8s ease-in-out infinite}
+#muteBtn{position:fixed;bottom:46px;right:16px;z-index:5002;background:#0b1018;border:1px solid #3a5a7a;color:#5a8aaa;font-size:11px;letter-spacing:1px;padding:7px 13px;border-radius:6px;cursor:pointer;font-family:'Share Tech Mono',monospace}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.15}}
 @keyframes flicker{0%,90%,100%{opacity:1}92%{opacity:.4}94%{opacity:1}96%{opacity:.2}}
-.scan-line{position:fixed;top:0;left:0;right:0;height:3px;background:linear-gradient(180deg,transparent,rgba(0,212,255,.05),transparent);animation:scanH 8s linear infinite;pointer-events:none;z-index:998}
+@keyframes alarmFlash{0%,100%{opacity:1}50%{opacity:.25}}
 @keyframes scanH{0%{transform:translateY(-100%)}100%{transform:translateY(100vh)}}
+.scan-line{position:fixed;top:0;left:0;right:0;height:3px;background:linear-gradient(180deg,transparent,rgba(0,212,255,.05),transparent);animation:scanH 8s linear infinite;pointer-events:none;z-index:998}
 </style>
 </head>
 <body>
 <div class="scan-line"></div>
+<div id="alarmOverlay"></div>
+<div id="alarmBanner"></div>
+<button id="muteBtn" onclick="toggleMute()">🔔 静音</button>
+
 <div class="top-bar">
   <div class="logo">TRACE AERIAL</div>
   <div class="status-row">
@@ -80,6 +92,7 @@ canvas{display:block}
   </div>
   <div class="clock" id="clock">--:--:--</div>
 </div>
+
 <div class="main">
   <div class="side-panel">
     <div class="panel-block">
@@ -107,6 +120,7 @@ canvas{display:block}
       </div>
     </div>
   </div>
+
   <div class="center">
     <img id="videoFeed" style="width:100%;height:100%;object-fit:cover;display:none">
     <div class="video-placeholder" id="videoPlaceholder">
@@ -136,6 +150,7 @@ canvas{display:block}
       </div>
     </div>
   </div>
+
   <div class="side-panel right">
     <div class="panel-block">
       <div class="block-label">HEADING</div>
@@ -157,7 +172,7 @@ canvas{display:block}
       <div class="block-label">LINK</div>
       <div style="font-size:10px;color:#5a8aaa;line-height:1.9">
         <div>LATENCY <span style="color:var(--amber)" id="latency">---</span> ms</div>
-        <div>RECONNECT <span style="color:var(--amber)" id="reconCnt">0</span></div>
+        <div>RECON <span style="color:var(--amber)" id="reconCnt">0</span></div>
         <div>STATUS <span style="color:var(--green)" id="linkStat">INIT</span></div>
       </div>
     </div>
@@ -170,11 +185,16 @@ canvas{display:block}
       </div>
     </div>
     <div class="panel-block" style="flex:1">
-      <div class="block-label">DEBUG</div>
-      <div id="padDbg" style="font-size:9px;color:#3a6a4a;line-height:1.7;word-break:break-all">-</div>
+      <div class="block-label">ALARM STATUS</div>
+      <div style="font-size:10px;color:#5a8aaa;line-height:1.9">
+        <div>姿态 <span id="attAlm" style="color:var(--green)">正常</span></div>
+        <div>连接 <span id="conAlm" style="color:var(--green)">正常</span></div>
+        <div>音频 <span id="audioStat" style="color:var(--amber)">点屏幕解锁</span></div>
+      </div>
     </div>
   </div>
 </div>
+
 <div class="bottom-bar">
   <div class="coord-display"><div>DRONE <span>ND-7</span></div><div>PAYLOAD <span>iPhone CAM</span></div></div>
   <div class="mission-status" id="missionTxt">■ STANDBY</div>
@@ -190,15 +210,127 @@ const state={
   flightSeconds:0,accHistory:new Array(60).fill(1.0)
 };
 let useSimulation=true;
-let _simLock=false;
 let ws_p,reconnects=0,pingTimer,lastPing,latencyMs=0,flightStart=null;
+let iPhoneOnline=false;
 
-function pdbg(t){document.getElementById('padDbg').textContent=t;console.log('[PAD]',t)}
+// ── 音频 ──
+let audioCtx=null,muted=false,audioUnlocked=false;
+let attAlarmOn=false,conAlarmOn=false;
 
-// 时钟
+function unlockAudio(){
+  if(audioUnlocked)return;
+  try{
+    audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+    const b=audioCtx.createBuffer(1,1,22050);
+    const s=audioCtx.createBufferSource();
+    s.buffer=b;s.connect(audioCtx.destination);s.start(0);
+    audioUnlocked=true;
+    document.getElementById('audioStat').textContent='已解锁';
+    document.getElementById('audioStat').style.color='var(--green)';
+  }catch(e){}
+}
+
+function playTone(freq,type,duration,volume){
+  if(!audioCtx||muted)return;
+  const osc=audioCtx.createOscillator();
+  const gain=audioCtx.createGain();
+  osc.connect(gain);gain.connect(audioCtx.destination);
+  osc.type=type;osc.frequency.value=freq;
+  gain.gain.setValueAtTime(volume,audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+duration);
+  osc.start(audioCtx.currentTime);
+  osc.stop(audioCtx.currentTime+duration);
+  return osc;
+}
+
+// 姿态警报：急促双音 嘀嘀嘀
+function startAttitudeAlarm(){
+  if(attAlarmOn||muted)return;
+  attAlarmOn=true;
+  function beat(){
+    if(!attAlarmOn||muted)return;
+    playTone(1200,'square',0.12,0.35);
+    setTimeout(()=>{
+      if(!attAlarmOn||muted)return;
+      playTone(800,'square',0.12,0.35);
+      setTimeout(()=>{if(attAlarmOn&&!muted)beat();},300);
+    },150);
+  }
+  beat();
+}
+function stopAttitudeAlarm(){attAlarmOn=false;}
+
+// 断连警报：低沉慢速 嗡—嗡—
+function startDisconnectAlarm(){
+  if(conAlarmOn||muted)return;
+  conAlarmOn=true;
+  function beat(){
+    if(!conAlarmOn||muted)return;
+    playTone(440,'sawtooth',0.6,0.4);
+    setTimeout(()=>{if(conAlarmOn&&!muted)beat();},1000);
+  }
+  beat();
+}
+function stopDisconnectAlarm(){conAlarmOn=false;}
+
+function toggleMute(){
+  muted=!muted;
+  document.getElementById('muteBtn').textContent=muted?'🔕 已静音':'🔔 静音';
+  if(muted){stopAttitudeAlarm();stopDisconnectAlarm();clearAlarmUI();}
+}
+
+// ── 警报UI ──
+function showAlarm(type,text){
+  const o=document.getElementById('alarmOverlay'),b=document.getElementById('alarmBanner');
+  o.className=type;o.style.display='block';
+  b.className=type;b.style.display='block';b.textContent=text;
+}
+function clearAlarmUI(){
+  document.getElementById('alarmOverlay').style.display='none';
+  document.getElementById('alarmBanner').style.display='none';
+}
+
+// ── 警报检查 ──
+function checkAlarms(){
+  const absP=Math.abs(state.pitch),absR=Math.abs(state.roll);
+  // 姿态：超过90度全警，超过45度黄警
+  if(!useSimulation&&(absP>90||absR>90)){
+    if(!attAlarmOn){
+      startAttitudeAlarm();
+      showAlarm('attitude','⚠ ATTITUDE WARNING ⚠\nP:'+state.pitch.toFixed(1)+'°  R:'+state.roll.toFixed(1)+'°');
+    }
+    document.getElementById('attAlm').textContent='危险 '+absP.toFixed(0)+'°/'+absR.toFixed(0)+'°';
+    document.getElementById('attAlm').style.color='var(--red)';
+  } else if(!useSimulation&&(absP>45||absR>45)){
+    stopAttitudeAlarm();clearAlarmUI();
+    document.getElementById('attAlm').textContent='警告 '+absP.toFixed(0)+'°/'+absR.toFixed(0)+'°';
+    document.getElementById('attAlm').style.color='var(--amber)';
+  } else {
+    if(attAlarmOn){stopAttitudeAlarm();clearAlarmUI();}
+    document.getElementById('attAlm').textContent='正常';
+    document.getElementById('attAlm').style.color='var(--green)';
+  }
+
+  // 断连：iPhone曾经上线后又离线
+  if(!iPhoneOnline&&flightStart){
+    if(!conAlarmOn){
+      startDisconnectAlarm();
+      showAlarm('disconnect','⚠ LINK LOST ⚠\niPhone 信号丢失');
+    }
+    document.getElementById('conAlm').textContent='断连！';
+    document.getElementById('conAlm').style.color='var(--red)';
+  } else if(iPhoneOnline){
+    if(conAlarmOn){stopDisconnectAlarm();}
+    if(!attAlarmOn)clearAlarmUI();
+    document.getElementById('conAlm').textContent='正常';
+    document.getElementById('conAlm').style.color='var(--green)';
+  }
+}
+
+// ── 时钟 ──
 setInterval(()=>{document.getElementById('clock').textContent=new Date().toTimeString().slice(0,8)},1000);
 
-// 飞行计时
+// ── 飞行计时 ──
 function updateFlightTimer(){
   if(!flightStart)return;
   state.flightSeconds=Math.floor((Date.now()-flightStart)/1000);
@@ -208,21 +340,18 @@ function updateFlightTimer(){
   document.getElementById('timeBar').style.width=Math.min(100,(state.flightSeconds/1800)*100)+'%';
 }
 
-// 模拟数据
+// ── 模拟 ──
 let t=0;
 function simulate(){
   t+=0.016;
-  state.pitch=Math.sin(t*.3)*6;
-  state.roll=Math.sin(t*.25+1)*10;
-  state.yaw=(state.yaw+.25+360)%360;
-  state.heading=state.yaw;
-  state.altitude=25+Math.sin(t*.1)*5;
-  state.speed=10+Math.sin(t*.2)*4;
+  state.pitch=Math.sin(t*.3)*6;state.roll=Math.sin(t*.25+1)*10;
+  state.yaw=(state.yaw+.25+360)%360;state.heading=state.yaw;
+  state.altitude=25+Math.sin(t*.1)*5;state.speed=10+Math.sin(t*.2)*4;
   state.gforce=1+Math.abs(Math.sin(t*.3)*.12);
   state.accHistory.push(state.gforce);state.accHistory.shift();
 }
 
-// DOM更新
+// ── DOM ──
 function updateDOM(){
   const s=state;
   document.getElementById('alt').textContent=s.altitude.toFixed(1);
@@ -245,9 +374,10 @@ function updateDOM(){
   const ho=document.getElementById('horizonOverlay');
   ho.style.transform=`translate(-50%,calc(-50% + ${-s.pitch*1.4}px)) rotate(${-s.roll}deg)`;
   updateFlightTimer();
+  checkAlarms();
 }
 
-// 人工地平仪
+// ── 地平仪 ──
 const hC=document.getElementById('horizonCanvas');
 function drawHorizon(){
   const p=hC.parentElement,sz=p.offsetWidth*.93;
@@ -283,117 +413,87 @@ function drawHorizon(){
     ctx.lineWidth=a===0?1.5:.7;
     ctx.beginPath();
     ctx.moveTo(Math.cos(rad)*(r-13),Math.sin(rad)*(r-13));
-    ctx.lineTo(Math.cos(rad)*(r-7),Math.sin(rad)*(r-7));
-    ctx.stroke();
+    ctx.lineTo(Math.cos(rad)*(r-7),Math.sin(rad)*(r-7));ctx.stroke();
   }
   ctx.rotate(rr);ctx.fillStyle='rgba(0,212,255,.85)';
   ctx.beginPath();ctx.moveTo(0,-(r-7));ctx.lineTo(-4,-(r-18));ctx.lineTo(4,-(r-18));ctx.closePath();ctx.fill();
   ctx.restore();
+  const absP=Math.abs(state.pitch),absR=Math.abs(state.roll);
+  ctx.strokeStyle=(!useSimulation&&(absP>90||absR>90))?'#ff3b3b':(!useSimulation&&(absP>45||absR>45))?'#ffaa00':'#1a3a5a';
+  ctx.lineWidth=3;ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.stroke();
   ctx.strokeStyle='rgba(245,166,35,.85)';ctx.lineWidth=1.8;
   ctx.beginPath();
   ctx.moveTo(cx-r*.33,cy);ctx.lineTo(cx-r*.14,cy);
   ctx.moveTo(cx-r*.14,cy);ctx.lineTo(cx,cy+r*.07);ctx.lineTo(cx+r*.14,cy);
   ctx.moveTo(cx+r*.14,cy);ctx.lineTo(cx+r*.33,cy);
   ctx.moveTo(cx-r*.09,cy-r*.23);ctx.lineTo(cx+r*.09,cy-r*.23);
-  ctx.stroke();
-  ctx.restore();
-  ctx.strokeStyle='#1a3a5a';ctx.lineWidth=3;
-  ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.stroke();
+  ctx.stroke();ctx.restore();
 }
 
-// 罗盘
+// ── 罗盘 ──
 const cC=document.getElementById('compassCanvas');
 function drawCompass(){
-  const sz=cC.parentElement.offsetWidth*.93;
-  cC.width=sz;cC.height=sz;
+  const sz=cC.parentElement.offsetWidth*.93;cC.width=sz;cC.height=sz;
   const ctx=cC.getContext('2d'),W=sz,cx=W/2,cy=W/2,r=W/2-5,hdg=state.heading;
   ctx.clearRect(0,0,W,W);
   const bg=ctx.createRadialGradient(cx,cy,0,cx,cy,r);
   bg.addColorStop(0,'#081420');bg.addColorStop(1,'#030810');
   ctx.fillStyle=bg;ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fill();
-  ctx.strokeStyle='#1a3a5a';ctx.lineWidth=2;
-  ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.stroke();
+  ctx.strokeStyle='#1a3a5a';ctx.lineWidth=2;ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.stroke();
   ctx.save();ctx.translate(cx,cy);ctx.rotate(-hdg*Math.PI/180);
   const dirs=['N','NE','E','SE','S','SW','W','NW'];
   for(let i=0;i<360;i+=5){
     const rad=i*Math.PI/180,iM=i%45===0,im=i%10===0;
     const inn=iM?r*.62:im?r*.73:r*.81;
-    ctx.strokeStyle=iM?'rgba(0,212,255,.8)':'rgba(0,212,255,.22)';
-    ctx.lineWidth=iM?1.5:.5;
-    ctx.beginPath();
-    ctx.moveTo(Math.sin(rad)*inn,-Math.cos(rad)*inn);
-    ctx.lineTo(Math.sin(rad)*(r-4),-Math.cos(rad)*(r-4));
-    ctx.stroke();
-    if(iM){
-      const lb=dirs[i/45],fr=r*.54;
-      ctx.fillStyle=lb==='N'?'#ff3b3b':'rgba(0,212,255,.8)';
-      ctx.font=`bold ${W*.075}px Orbitron`;
-      ctx.textAlign='center';ctx.textBaseline='middle';
-      ctx.fillText(lb,Math.sin(rad)*fr,-Math.cos(rad)*fr);
-    }
+    ctx.strokeStyle=iM?'rgba(0,212,255,.8)':'rgba(0,212,255,.22)';ctx.lineWidth=iM?1.5:.5;
+    ctx.beginPath();ctx.moveTo(Math.sin(rad)*inn,-Math.cos(rad)*inn);ctx.lineTo(Math.sin(rad)*(r-4),-Math.cos(rad)*(r-4));ctx.stroke();
+    if(iM){const lb=dirs[i/45],fr=r*.54;ctx.fillStyle=lb==='N'?'#ff3b3b':'rgba(0,212,255,.8)';ctx.font=`bold ${W*.075}px Orbitron`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(lb,Math.sin(rad)*fr,-Math.cos(rad)*fr);}
   }
   ctx.restore();
-  ctx.fillStyle='#ff3b3b';
-  ctx.beginPath();ctx.moveTo(cx,cy-r+2);ctx.lineTo(cx-4,cy-r+11);ctx.lineTo(cx+4,cy-r+11);ctx.closePath();ctx.fill();
-  const dg=ctx.createRadialGradient(cx,cy,0,cx,cy,7);
-  dg.addColorStop(0,'rgba(0,212,255,.7)');dg.addColorStop(1,'transparent');
+  ctx.fillStyle='#ff3b3b';ctx.beginPath();ctx.moveTo(cx,cy-r+2);ctx.lineTo(cx-4,cy-r+11);ctx.lineTo(cx+4,cy-r+11);ctx.closePath();ctx.fill();
+  const dg=ctx.createRadialGradient(cx,cy,0,cx,cy,7);dg.addColorStop(0,'rgba(0,212,255,.7)');dg.addColorStop(1,'transparent');
   ctx.fillStyle=dg;ctx.beginPath();ctx.arc(cx,cy,7,0,Math.PI*2);ctx.fill();
 }
 
-// 加速度折线
+// ── 折线 ──
 const spC=document.getElementById('accSpark');
 function drawSpark(){
-  const W=spC.parentElement.offsetWidth,H=38;
-  spC.width=W;spC.height=H;
+  const W=spC.parentElement.offsetWidth,H=38;spC.width=W;spC.height=H;
   const ctx=spC.getContext('2d'),data=state.accHistory,mn=0.8,mx=1.5,dx=W/(data.length-1);
   ctx.clearRect(0,0,W,H);
-  const gr=ctx.createLinearGradient(0,0,0,H);
-  gr.addColorStop(0,'rgba(0,212,255,.28)');gr.addColorStop(1,'rgba(0,212,255,0)');
+  const gr=ctx.createLinearGradient(0,0,0,H);gr.addColorStop(0,'rgba(0,212,255,.28)');gr.addColorStop(1,'rgba(0,212,255,0)');
   ctx.fillStyle=gr;ctx.beginPath();
   data.forEach((v,i)=>{const x=i*dx,y=H-((v-mn)/(mx-mn))*H;i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});
   ctx.lineTo(W,H);ctx.closePath();ctx.fill();
   ctx.strokeStyle='rgba(0,212,255,.8)';ctx.lineWidth=1.5;ctx.beginPath();
-  data.forEach((v,i)=>{const x=i*dx,y=H-((v-mn)/(mx-mn))*H;i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});
-  ctx.stroke();
+  data.forEach((v,i)=>{const x=i*dx,y=H-((v-mn)/(mx-mn))*H;i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});ctx.stroke();
 }
 
-// WebSocket
+// ── WebSocket ──
 function connectPad(){
-  pdbg('连接中...');
-  try{ws_p=new WebSocket(SERVER)}catch(e){pdbg('创建失败:'+e.message);setTimeout(connectPad,4000);return}
-
+  try{ws_p=new WebSocket(SERVER)}catch(e){setTimeout(connectPad,4000);return}
   ws_p.onopen=()=>{
     reconnects=0;
-    pdbg('已连接，发送ipad-hello');
     ws_p.send(JSON.stringify({type:'ipad-hello'}));
     setDot('dotServer','green');
     document.getElementById('linkStat').textContent='ONLINE';
     document.getElementById('linkStat').style.color='var(--green)';
     clearInterval(pingTimer);
-    pingTimer=setInterval(()=>{
-      if(ws_p.readyState===1){lastPing=Date.now();ws_p.send(JSON.stringify({type:'ping'}));}
-    },2000);
+    pingTimer=setInterval(()=>{if(ws_p.readyState===1){lastPing=Date.now();ws_p.send(JSON.stringify({type:'ping'}));}},2000);
   };
-
   ws_p.onmessage=(e)=>{
     let msg;try{msg=JSON.parse(e.data)}catch{return}
-    pdbg('收到:'+msg.type);
-
-    if(msg.type==='pong'){
-      latencyMs=Date.now()-lastPing;
-      document.getElementById('latency').textContent=latencyMs;
-    }
-
+    if(msg.type==='pong'){latencyMs=Date.now()-lastPing;document.getElementById('latency').textContent=latencyMs;}
     if(msg.type==='iphone-online'){
-      pdbg('iPhone上线！');
+      iPhoneOnline=true;
       setDot('dotPhone','green');
       document.getElementById('lblPhone').textContent='iPhone在线';
       document.getElementById('missionTxt').textContent='■ MISSION ACTIVE';
       if(!flightStart)flightStart=Date.now();
+      stopDisconnectAlarm();
     }
-
     if(msg.type==='iphone-offline'){
-      pdbg('iPhone离线');
+      iPhoneOnline=false;
       setDot('dotPhone','off');setDot('dotVideo','off');
       document.getElementById('lblPhone').textContent='iPhone离线';
       document.getElementById('noSigTxt').textContent='iPhone 信号丢失，等待重连...';
@@ -401,7 +501,6 @@ function connectPad(){
       document.getElementById('videoPlaceholder').style.display='flex';
       useSimulation=true;
     }
-
     if(msg.type==='frame'){
       const img=document.getElementById('videoFeed');
       img.src=msg.data;
@@ -410,14 +509,11 @@ function connectPad(){
         document.getElementById('videoPlaceholder').style.display='none';
         setDot('dotVideo','green');
         document.getElementById('lblVideo').textContent='视频正常';
-        pdbg('视频已接收');
       }
     }
-
     if(msg.type==='sensors'){
       const d=msg.data;
       useSimulation=false;
-      _simLock=true;
       state.pitch=d.pitch;state.roll=d.roll;
       state.heading=d.heading;state.yaw=d.heading;
       state.gforce=d.gforce;state.speed=d.speed;
@@ -426,19 +522,15 @@ function connectPad(){
       state.accHistory.push(d.gforce);state.accHistory.shift();
     }
   };
-
   ws_p.onclose=()=>{
-    clearInterval(pingTimer);
-    reconnects++;
-    pdbg('断线，第'+reconnects+'次重连');
+    clearInterval(pingTimer);reconnects++;
     setDot('dotServer','warn');
     document.getElementById('linkStat').textContent='RECONNECTING';
     document.getElementById('linkStat').style.color='var(--amber)';
     document.getElementById('reconCnt').textContent=reconnects;
     setTimeout(connectPad,Math.min(16000,1000*Math.pow(2,Math.min(reconnects-1,4))));
   };
-
-  ws_p.onerror=(e)=>{pdbg('WS错误');};
+  ws_p.onerror=()=>{};
 }
 
 function setDot(id,st){
@@ -446,15 +538,15 @@ function setDot(id,st){
   d.className='dot'+(st==='warn'?' warn':st==='off'?' off':'');
 }
 
-// 主循环
 function loop(){
-  if(useSimulation&&!_simLock)simulate();
+  if(useSimulation)simulate();
   updateDOM();drawHorizon();drawCompass();drawSpark();
   requestAnimationFrame(loop);
 }
 
 window.onload=()=>{
-  pdbg('页面加载');
+  document.addEventListener('click',unlockAudio,{once:true});
+  document.addEventListener('touchstart',unlockAudio,{once:true});
   connectPad();
   loop();
 };

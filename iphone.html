@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
@@ -13,28 +14,35 @@ h2{font-size:12px;letter-spacing:4px;color:#00cc66;margin-bottom:20px;border-bot
 .btn{width:100%;padding:18px;background:#001a10;border:2px solid #00ff88;color:#00ff88;font-size:16px;letter-spacing:2px;border-radius:10px;margin-top:20px;font-family:'Courier New',monospace}
 video{width:100%;border-radius:8px;margin-top:14px;border:1px solid #003020}
 .warn{background:#1a0800;border:1px solid #ff6600;color:#ff9944;border-radius:8px;padding:12px;font-size:12px;line-height:1.9;margin-top:16px}
+.log{background:#001a10;border:1px solid #003020;border-radius:8px;padding:10px;font-size:11px;color:#5a9a6a;line-height:1.8;margin-top:12px;min-height:80px;word-break:break-all}
 </style>
 </head>
 <body>
 <h2>TRACE AERIAL · 飞行端</h2>
 <div class="row"><span class="label">服务器</span><span id="s1"><span class="wait">连接中...</span></span></div>
 <div class="row"><span class="label">摄像头</span><span id="s2"><span class="wait">未启动</span></span></div>
-<div class="row"><span class="label">传感器</span><span id="s3"><span class="wait">未启动</span></span></div>
+<div class="row"><span class="label">方向传感器</span><span id="s3"><span class="wait">未启动</span></span></div>
+<div class="row"><span class="label">运动传感器</span><span id="s3b"><span class="wait">未启动</span></span></div>
+<div class="row"><span class="label">GPS</span><span id="s3c"><span class="wait">未启动</span></span></div>
 <div class="row"><span class="label">iPad在线</span><span id="s4"><span class="wait">等待中</span></span></div>
 <div class="row"><span class="label">推流帧率</span><span id="s5"><span class="wait">--</span></span></div>
 <div class="row"><span class="label">重连次数</span><span id="s6">0</span></div>
-<div class="row"><span class="label">调试日志</span><span id="dbg" style="font-size:11px;color:#5a8a6a;max-width:60%;text-align:right">-</span></div>
-<button class="btn" id="btn" onclick="startAll()">▶ 启动</button>
+<button class="btn" id="btn" onclick="startAll()">▶ 第一步：启动摄像头</button>
+<button class="btn" id="btn2" onclick="startSensors()" style="margin-top:10px;border-color:#ffaa00;color:#ffaa00">▶ 第二步：启动传感器（必须单独点）</button>
 <video id="v" autoplay muted playsinline></video>
+<div class="log" id="log">等待操作...</div>
 <div class="warn">
-⚠️ 必须用 Safari 打开<br>
-· 允许摄像头权限<br>
-· 允许位置权限<br>
-· 设置→显示与亮度→自动锁定→永不
+⚠️ iOS 18 必须分两步操作<br>
+· 先点第一步启动摄像头<br>
+· 再点第二步启动传感器<br>
+· 两个按钮都要点，顺序不能反<br>
+· 必须用 Safari 打开
 </div>
+
 <script>
 const SERVER='wss://trace-light-drone-server.onrender.com';
 let ws,stream,retries=0,sensorTimer,frameTimer,frameCount=0,fpsTimer;
+let sensorStarted=false;
 const sensor={pitch:0,roll:0,heading:0,gforce:1,speed:0,altitude:null,lat:null,lon:null};
 const canvas=document.createElement('canvas');
 const ctx2d=canvas.getContext('2d');
@@ -43,27 +51,30 @@ function set(id,html){document.getElementById(id).innerHTML=html}
 function ok(t){return`<span class="ok">✓ ${t}</span>`}
 function err(t){return`<span class="err">✗ ${t}</span>`}
 function wait(t){return`<span class="wait">${t}</span>`}
-function dbg(t){document.getElementById('dbg').textContent=t;console.log('[DBG]',t)}
+function log(t){
+  const el=document.getElementById('log');
+  el.textContent=t+'\n'+el.textContent.slice(0,300);
+  console.log('[DBG]',t);
+}
 
 window.onload=()=>{
-  dbg('页面加载，开始连接...');
+  log('页面加载，开始连接服务器...');
   connectWS();
 };
 
 function connectWS(){
-  dbg('正在创建WebSocket...');
+  log('创建WebSocket...');
   try{
     ws=new WebSocket(SERVER);
-    dbg('WebSocket已创建，等待连接');
   }catch(e){
-    dbg('创建失败:'+e.message);
+    log('创建失败:'+e.message);
     scheduleReconnect();
     return;
   }
 
   ws.onopen=()=>{
     retries=0;
-    dbg('onopen触发！发送iphone-hello');
+    log('✓ 服务器已连接，发送iphone-hello');
     set('s1',ok('已连接'));
     ws.send(JSON.stringify({type:'iphone-hello'}));
     clearInterval(sensorTimer);
@@ -71,14 +82,12 @@ function connectWS(){
   };
 
   ws.onmessage=(e)=>{
-    let msg;
-    try{msg=JSON.parse(e.data)}catch{return}
-    dbg('收到消息:'+msg.type);
-    if(msg.type==='ipad-online'||msg.type==='iphone-online')return;
+    let msg;try{msg=JSON.parse(e.data)}catch{return}
+    log('收到消息: '+msg.type);
   };
 
   ws.onclose=(e)=>{
-    dbg('连接关闭 code:'+e.code+' reason:'+e.reason);
+    log('连接关闭 code:'+e.code);
     set('s1',wait('断线重连...'));
     clearInterval(sensorTimer);
     clearInterval(frameTimer);
@@ -86,8 +95,8 @@ function connectWS(){
     scheduleReconnect();
   };
 
-  ws.onerror=(e)=>{
-    dbg('WebSocket错误');
+  ws.onerror=()=>{
+    log('WebSocket错误');
     set('s1',err('连接错误'));
   };
 }
@@ -96,14 +105,129 @@ function scheduleReconnect(){
   retries++;
   set('s6',retries);
   const delay=Math.min(16000,1000*Math.pow(2,Math.min(retries-1,4)));
-  dbg('将在'+delay+'ms后重连');
+  log('将在'+delay+'ms后重连');
   setTimeout(connectWS,delay);
 }
 
+// ── 第一步：摄像头 ──
+async function startAll(){
+  document.getElementById('btn').disabled=true;
+  document.getElementById('btn').textContent='启动中...';
+  log('请求摄像头权限...');
+
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}},
+      audio:false
+    });
+    document.getElementById('v').srcObject=stream;
+    set('s2',ok('后置摄像头'));
+    log('✓ 摄像头已启动');
+    document.getElementById('btn').textContent='✓ 摄像头已启动';
+  }catch(e){
+    set('s2',err(e.message));
+    log('✗ 摄像头失败: '+e.message);
+    document.getElementById('btn').disabled=false;
+    document.getElementById('btn').textContent='重试摄像头';
+    return;
+  }
+
+  document.getElementById('v').onloadedmetadata=()=>{
+    log('视频就绪，开始推帧');
+    startFrameLoop();
+  };
+}
+
+// ── 第二步：传感器（iOS必须用独立用户手势触发） ──
+async function startSensors(){
+  document.getElementById('btn2').disabled=true;
+  document.getElementById('btn2').textContent='请求权限中...';
+  log('开始请求传感器权限...');
+
+  // 方向传感器
+  if(typeof DeviceOrientationEvent!=='undefined' && typeof DeviceOrientationEvent.requestPermission==='function'){
+    try{
+      log('请求DeviceOrientation权限...');
+      const r=await DeviceOrientationEvent.requestPermission();
+      log('方向权限结果: '+r);
+      if(r==='granted'){
+        set('s3',ok('已授权'));
+      }else{
+        set('s3',err('被拒绝'));
+        log('✗ 方向权限被拒绝，请在设置里允许');
+      }
+    }catch(e){
+      log('方向权限异常: '+e.message);
+      set('s3',err(e.message));
+    }
+  }else{
+    log('DeviceOrientation无需权限（非iOS13+）');
+    set('s3',ok('无需授权'));
+  }
+
+  // 运动传感器
+  if(typeof DeviceMotionEvent!=='undefined' && typeof DeviceMotionEvent.requestPermission==='function'){
+    try{
+      log('请求DeviceMotion权限...');
+      const r=await DeviceMotionEvent.requestPermission();
+      log('运动权限结果: '+r);
+      if(r==='granted'){
+        set('s3b',ok('已授权'));
+      }else{
+        set('s3b',err('被拒绝'));
+      }
+    }catch(e){
+      log('运动权限异常: '+e.message);
+      set('s3b',err(e.message));
+    }
+  }else{
+    log('DeviceMotion无需权限');
+    set('s3b',ok('无需授权'));
+  }
+
+  // 注册事件监听
+  log('注册deviceorientation监听...');
+  window.addEventListener('deviceorientation',(e)=>{
+    sensor.pitch=+(e.beta??0).toFixed(1);
+    sensor.roll=+(e.gamma??0).toFixed(1);
+    sensor.heading=Math.round(e.alpha??0);
+  },true);
+
+  window.addEventListener('devicemotion',(e)=>{
+    const a=e.accelerationIncludingGravity;
+    if(a){
+      sensor.gforce=+(Math.sqrt((a.x??0)**2+(a.y??0)**2+(a.z??0)**2)/9.81).toFixed(2);
+    }
+  },true);
+
+  // GPS
+  if('geolocation' in navigator){
+    log('请求GPS...');
+    navigator.geolocation.watchPosition((p)=>{
+      sensor.lat=p.coords.latitude;
+      sensor.lon=p.coords.longitude;
+      sensor.altitude=p.coords.altitude??null;
+      sensor.speed=+((p.coords.speed??0)*3.6).toFixed(1);
+      set('s3c',ok(sensor.lat.toFixed(4)+','+sensor.lon.toFixed(4)));
+    },(e)=>{
+      log('GPS错误: '+e.message);
+      set('s3c',err(e.message));
+    },{enableHighAccuracy:true,maximumAge:500,timeout:10000});
+  }
+
+  sensorStarted=true;
+  document.getElementById('btn2').textContent='✓ 传感器已启动';
+
+  // 5秒后检查数据是否真的进来
+  setTimeout(()=>{
+    log('传感器检查: pitch='+sensor.pitch+' roll='+sensor.roll+' heading='+sensor.heading+' g='+sensor.gforce);
+  },5000);
+}
+
+// ── 推帧 ──
 function startFrameLoop(){
   const video=document.getElementById('v');
-  canvas.width=640;
-  canvas.height=360;
+  canvas.width=640;canvas.height=360;
   frameCount=0;
 
   fpsTimer=setInterval(()=>{
@@ -121,71 +245,11 @@ function startFrameLoop(){
 }
 
 function sendSensors(){
-  if(ws?.readyState===1)ws.send(JSON.stringify({type:'sensors',data:sensor}));
-}
-
-async function startAll(){
-  document.getElementById('btn').disabled=true;
-  document.getElementById('btn').textContent='启动中...';
-  dbg('启动摄像头...');
-
-  try{
-    stream=await navigator.mediaDevices.getUserMedia({
-      video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}},
-      audio:false
-    });
-    document.getElementById('v').srcObject=stream;
-    set('s2',ok('后置摄像头'));
-    dbg('摄像头已启动');
-  }catch(e){
-    set('s2',err(e.message));
-    dbg('摄像头失败:'+e.message);
-    document.getElementById('btn').disabled=false;
-    document.getElementById('btn').textContent='重试';
-    return;
+  if(ws?.readyState===1){
+    ws.send(JSON.stringify({type:'sensors',data:sensor}));
   }
-
-  if(typeof DeviceOrientationEvent?.requestPermission==='function'){
-    try{
-      const r1=await DeviceOrientationEvent.requestPermission();
-      dbg('方向权限:'+r1);
-    }catch(e){dbg('方向权限异常:'+e.message);}
-  }
-  if(typeof DeviceMotionEvent?.requestPermission==='function'){
-    try{
-      const r2=await DeviceMotionEvent.requestPermission();
-      dbg('运动权限:'+r2);
-    }catch(e){dbg('运动权限异常:'+e.message);}
-  }
-
-
-  window.addEventListener('deviceorientation',(e)=>{
-    sensor.pitch=+(e.beta??0).toFixed(1);
-    sensor.roll=+(e.gamma??0).toFixed(1);
-    sensor.heading=Math.round(e.alpha??0);
-  },true);
-
-  window.addEventListener('devicemotion',(e)=>{
-    const a=e.accelerationIncludingGravity;
-    if(a)sensor.gforce=+(Math.sqrt((a.x??0)**2+(a.y??0)**2+(a.z??0)**2)/9.81).toFixed(2);
-  },true);
-
-  navigator.geolocation?.watchPosition((p)=>{
-    sensor.lat=p.coords.latitude;
-    sensor.lon=p.coords.longitude;
-    sensor.altitude=p.coords.altitude??null;
-    sensor.speed=+((p.coords.speed??0)*3.6).toFixed(1);
-  },null,{enableHighAccuracy:true,maximumAge:500,timeout:8000});
-
-  set('s3',ok('陀螺仪+GPS'));
-  document.getElementById('btn').textContent='✓ 运行中';
-  dbg('等待视频就绪...');
-
-  document.getElementById('v').onloadedmetadata=()=>{
-    dbg('视频就绪，开始推帧');
-    startFrameLoop();
-  };
 }
 </script>
+
 </body>
 </html>

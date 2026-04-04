@@ -11,7 +11,6 @@ h2{font-size:12px;letter-spacing:4px;color:#00cc66;margin-bottom:20px;border-bot
 .row{display:flex;justify-content:space-between;padding:11px 0;border-bottom:1px solid #001a10;font-size:13px}
 .label{color:#336644}.ok{color:#00ff88}.err{color:#ff4444}.wait{color:#ffaa00}
 .btn{width:100%;padding:18px;background:#001a10;border:2px solid #00ff88;color:#00ff88;font-size:16px;letter-spacing:2px;border-radius:10px;margin-top:20px;font-family:'Courier New',monospace}
-.btn:disabled{opacity:.3}
 video{width:100%;border-radius:8px;margin-top:14px;border:1px solid #003020}
 .warn{background:#1a0800;border:1px solid #ff6600;color:#ff9944;border-radius:8px;padding:12px;font-size:12px;line-height:1.9;margin-top:16px}
 </style>
@@ -22,7 +21,7 @@ video{width:100%;border-radius:8px;margin-top:14px;border:1px solid #003020}
 <div class="row"><span class="label">摄像头</span><span id="s2"><span class="wait">未启动</span></span></div>
 <div class="row"><span class="label">传感器</span><span id="s3"><span class="wait">未启动</span></span></div>
 <div class="row"><span class="label">iPad在线</span><span id="s4"><span class="wait">等待中</span></span></div>
-<div class="row"><span class="label">视频推流</span><span id="s5"><span class="wait">未开始</span></span></div>
+<div class="row"><span class="label">推流帧率</span><span id="s5"><span class="wait">--</span></span></div>
 <div class="row"><span class="label">重连次数</span><span id="s6">0</span></div>
 <button class="btn" id="btn" onclick="startAll()">▶ 启动</button>
 <video id="v" autoplay muted playsinline></video>
@@ -34,21 +33,16 @@ video{width:100%;border-radius:8px;margin-top:14px;border:1px solid #003020}
 </div>
 <script>
 const SERVER='wss://trace-light-drone-server.onrender.com';
-const ICE={iceServers:[
-  {urls:'stun:stun.l.google.com:19302'},
-  {urls:'stun:stun.cloudflare.com:3478'},
-  {urls:'turn:turn.cloudflare.com:3478',username:'openrelayproject',credential:'openrelayproject'},
-  {urls:'turn:fr-turn.xirsys.com:80?transport=udp',username:'openrelayproject',credential:'openrelayproject'},
-  {urls:'turn:fr-turn.xirsys.com:443?transport=tcp',username:'openrelayproject',credential:'openrelayproject'}
-]};
-let ws,pc,stream,retries=0,sensorTimer;
+let ws,stream,retries=0,sensorTimer,frameTimer,frameCount=0,fpsTimer;
 const sensor={pitch:0,roll:0,heading:0,gforce:1,speed:0,altitude:null,lat:null,lon:null};
+const canvas=document.createElement('canvas');
+const ctx2d=canvas.getContext('2d');
+
 function set(id,html){document.getElementById(id).innerHTML=html}
 function ok(t){return`<span class="ok">✓ ${t}</span>`}
 function err(t){return`<span class="err">✗ ${t}</span>`}
 function wait(t){return`<span class="wait">${t}</span>`}
 
-// 页面加载后立刻连接服务器
 window.onload=()=>connectWS();
 
 function connectWS(){
@@ -62,13 +56,15 @@ function connectWS(){
   };
   ws.onmessage=(e)=>{
     let msg;try{msg=JSON.parse(e.data)}catch{return}
-    if(msg.type==='ipad-request-offer')createOffer();
-    if(msg.type==='answer')pc?.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-    if(msg.type==='ice-pad')pc?.addIceCandidate(new RTCIceCandidate(msg.candidate)).catch(()=>{});
+    if(msg.type==='ipad-hello'||msg.type==='iphone-online')return;
+    if(msg.type==='ipad-online'){
+      set('s4',ok('iPad已连接'));
+    }
   };
   ws.onclose=()=>{
     set('s1',wait('断线重连...'));
     clearInterval(sensorTimer);
+    clearInterval(frameTimer);
     scheduleReconnect();
   };
   ws.onerror=()=>{};
@@ -80,24 +76,27 @@ function scheduleReconnect(){
   setTimeout(connectWS,Math.min(16000,1000*Math.pow(2,Math.min(retries-1,4))));
 }
 
-async function createOffer(){
-  if(pc)pc.close();
-  pc=new RTCPeerConnection(ICE);
-  stream.getTracks().forEach(t=>pc.addTrack(t,stream));
-  pc.onicecandidate=(e)=>{
-    if(e.candidate&&ws.readyState===1)
-      ws.send(JSON.stringify({type:'ice-phone',candidate:e.candidate}));
-  };
-  pc.onconnectionstatechange=()=>{
-    const s=pc.connectionState;
-    if(s==='connected')set('s5',ok('推流中'));
-    if(s==='disconnected')set('s5',wait('中断，等待重连'));
-    if(s==='failed'){set('s5',err('重建中...'));setTimeout(createOffer,2000);}
-  };
-  set('s4',ok('iPad已连接'));
-  const offer=await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  ws.send(JSON.stringify({type:'offer',sdp:pc.localDescription}));
+// 抓帧并发送
+function startFrameLoop(){
+  const video=document.getElementById('v');
+  // 分辨率：宽640，高按比例
+  canvas.width=640;
+  canvas.height=360;
+
+  // FPS计数
+  fpsTimer=setInterval(()=>{
+    set('s5',ok(frameCount+' fps'));
+    frameCount=0;
+  },1000);
+
+  frameTimer=setInterval(()=>{
+    if(ws?.readyState!==1||video.readyState<2)return;
+    ctx2d.drawImage(video,0,0,640,360);
+    // 质量0.5，在带宽和画质间取平衡
+    const jpeg=canvas.toDataURL('image/jpeg',0.5);
+    ws.send(JSON.stringify({type:'frame',data:jpeg}));
+    frameCount++;
+  }, 100); // 10fps，4G足够流畅
 }
 
 function sendSensors(){
@@ -120,6 +119,7 @@ async function startAll(){
     document.getElementById('btn').textContent='重试';
     return;
   }
+
   if(typeof DeviceMotionEvent?.requestPermission==='function'){
     try{await DeviceMotionEvent.requestPermission()}catch{}
   }
@@ -138,8 +138,14 @@ async function startAll(){
     sensor.altitude=p.coords.altitude??null;
     sensor.speed=+((p.coords.speed??0)*3.6).toFixed(1);
   },null,{enableHighAccuracy:true,maximumAge:500,timeout:8000});
+
   set('s3',ok('陀螺仪+GPS'));
   document.getElementById('btn').textContent='✓ 运行中';
+
+  // 等视频就绪后开始推帧
+  document.getElementById('v').onloadedmetadata=()=>{
+    startFrameLoop();
+  };
 }
 </script>
 </body>

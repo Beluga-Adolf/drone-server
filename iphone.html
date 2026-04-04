@@ -51,6 +51,15 @@ function connectWS(){
     retries=0;
     set('s1',ok('已连接'));
     ws.send(JSON.stringify({type:'iphone-hello'}));
+    ws.onopen=()=>{
+    retries=0;
+    set('s1',ok('已连接'));
+    ws.send(JSON.stringify({type:'iphone-hello'}));
+    alert('已发送 iphone-hello'); // 调试用
+    clearInterval(sensorTimer);
+    sensorTimer=setInterval(sendSensors,100);
+};
+
     clearInterval(sensorTimer);
     sensorTimer=setInterval(sendSensors,100);
   };

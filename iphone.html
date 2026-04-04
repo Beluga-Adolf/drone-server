@@ -1,5 +1,4 @@
 <!DOCTYPE html>
-
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
@@ -27,10 +26,15 @@ video{width:100%;border-radius:8px;margin-top:14px;border:1px solid #003020}
 <div class="row"><span class="label">iPad在线</span><span id="s4"><span class="wait">等待中</span></span></div>
 <div class="row"><span class="label">推流帧率</span><span id="s5"><span class="wait">--</span></span></div>
 <div class="row"><span class="label">重连次数</span><span id="s6">0</span></div>
+
 <button class="btn" id="btn" onclick="startAll()">▶ 第一步：启动摄像头</button>
 <button class="btn" id="btn2" onclick="startSensors()" style="margin-top:10px;border-color:#ffaa00;color:#ffaa00">▶ 第二步：启动传感器（必须单独点）</button>
+<button class="btn" id="btn3" onclick="toggleRecording()" style="margin-top:10px;border-color:#00aaff;color:#00aaff">⏺ 开始本地录像</button>
+
 <video id="v" autoplay muted playsinline></video>
+
 <div class="log" id="log">等待操作...</div>
+
 <div class="warn">
 ⚠️ iOS 18 必须分两步操作<br>
 · 先点第一步启动摄像头<br>
@@ -41,9 +45,18 @@ video{width:100%;border-radius:8px;margin-top:14px;border:1px solid #003020}
 
 <script>
 const SERVER='wss://trace-light-drone-server.onrender.com';
+
 let ws,stream,retries=0,sensorTimer,frameTimer,frameCount=0,fpsTimer;
+
+// 新增：本地录像
+let recorder=null;
+let recordingChunks=[];
+let isRecording=false;
+
 let sensorStarted=false;
+
 const sensor={pitch:0,roll:0,heading:0,gforce:1,speed:0,altitude:null,lat:null,lon:null};
+
 const canvas=document.createElement('canvas');
 const ctx2d=canvas.getContext('2d');
 
@@ -51,6 +64,7 @@ function set(id,html){document.getElementById(id).innerHTML=html}
 function ok(t){return`<span class="ok">✓ ${t}</span>`}
 function err(t){return`<span class="err">✗ ${t}</span>`}
 function wait(t){return`<span class="wait">${t}</span>`}
+
 function log(t){
   const el=document.getElementById('log');
   el.textContent=t+'\n'+el.textContent.slice(0,300);
@@ -109,7 +123,6 @@ function scheduleReconnect(){
   setTimeout(connectWS,delay);
 }
 
-// ── 第一步：摄像头 ──
 async function startAll(){
   document.getElementById('btn').disabled=true;
   document.getElementById('btn').textContent='启动中...';
@@ -117,13 +130,20 @@ async function startAll(){
 
   try{
     stream=await navigator.mediaDevices.getUserMedia({
-      video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}},
+      video:{
+        facingMode:'environment',
+        width:{ideal:1280},
+        height:{ideal:720},
+        frameRate:{ideal:30}
+      },
       audio:false
     });
+
     document.getElementById('v').srcObject=stream;
     set('s2',ok('后置摄像头'));
     log('✓ 摄像头已启动');
     document.getElementById('btn').textContent='✓ 摄像头已启动';
+
   }catch(e){
     set('s2',err(e.message));
     log('✗ 摄像头失败: '+e.message);
@@ -138,55 +158,41 @@ async function startAll(){
   };
 }
 
-// ── 第二步：传感器（iOS必须用独立用户手势触发） ──
 async function startSensors(){
   document.getElementById('btn2').disabled=true;
   document.getElementById('btn2').textContent='请求权限中...';
   log('开始请求传感器权限...');
 
-  // 方向传感器
   if(typeof DeviceOrientationEvent!=='undefined' && typeof DeviceOrientationEvent.requestPermission==='function'){
     try{
-      log('请求DeviceOrientation权限...');
       const r=await DeviceOrientationEvent.requestPermission();
-      log('方向权限结果: '+r);
       if(r==='granted'){
         set('s3',ok('已授权'));
       }else{
         set('s3',err('被拒绝'));
-        log('✗ 方向权限被拒绝，请在设置里允许');
       }
     }catch(e){
-      log('方向权限异常: '+e.message);
       set('s3',err(e.message));
     }
   }else{
-    log('DeviceOrientation无需权限（非iOS13+）');
     set('s3',ok('无需授权'));
   }
 
-  // 运动传感器
   if(typeof DeviceMotionEvent!=='undefined' && typeof DeviceMotionEvent.requestPermission==='function'){
     try{
-      log('请求DeviceMotion权限...');
       const r=await DeviceMotionEvent.requestPermission();
-      log('运动权限结果: '+r);
       if(r==='granted'){
         set('s3b',ok('已授权'));
       }else{
         set('s3b',err('被拒绝'));
       }
     }catch(e){
-      log('运动权限异常: '+e.message);
       set('s3b',err(e.message));
     }
   }else{
-    log('DeviceMotion无需权限');
     set('s3b',ok('无需授权'));
   }
 
-  // 注册事件监听
-  log('注册deviceorientation监听...');
   window.addEventListener('deviceorientation',(e)=>{
     sensor.pitch=+(e.beta??0).toFixed(1);
     sensor.roll=+(e.gamma??0).toFixed(1);
@@ -200,9 +206,7 @@ async function startSensors(){
     }
   },true);
 
-  // GPS
   if('geolocation' in navigator){
-    log('请求GPS...');
     navigator.geolocation.watchPosition((p)=>{
       sensor.lat=p.coords.latitude;
       sensor.lon=p.coords.longitude;
@@ -210,24 +214,18 @@ async function startSensors(){
       sensor.speed=+((p.coords.speed??0)*3.6).toFixed(1);
       set('s3c',ok(sensor.lat.toFixed(4)+','+sensor.lon.toFixed(4)));
     },(e)=>{
-      log('GPS错误: '+e.message);
       set('s3c',err(e.message));
     },{enableHighAccuracy:true,maximumAge:500,timeout:10000});
   }
 
   sensorStarted=true;
   document.getElementById('btn2').textContent='✓ 传感器已启动';
-
-  // 5秒后检查数据是否真的进来
-  setTimeout(()=>{
-    log('传感器检查: pitch='+sensor.pitch+' roll='+sensor.roll+' heading='+sensor.heading+' g='+sensor.gforce);
-  },5000);
 }
 
-// ── 推帧 ──
 function startFrameLoop(){
   const video=document.getElementById('v');
-  canvas.width=640;canvas.height=360;
+  canvas.width=640;
+  canvas.height=360;
   frameCount=0;
 
   fpsTimer=setInterval(()=>{
@@ -249,7 +247,69 @@ function sendSensors(){
     ws.send(JSON.stringify({type:'sensors',data:sensor}));
   }
 }
-</script>
 
+// 新增：本地录像功能
+function toggleRecording(){
+  if(!stream){
+    alert('请先启动摄像头');
+    return;
+  }
+
+  if(!isRecording){
+    startRecording();
+  }else{
+    stopRecording();
+  }
+}
+
+function startRecording(){
+  try{
+    recordingChunks=[];
+
+    recorder=new MediaRecorder(stream);
+
+    recorder.ondataavailable=(e)=>{
+      if(e.data && e.data.size>0){
+        recordingChunks.push(e.data);
+      }
+    };
+
+    recorder.onstop=saveRecording;
+
+    recorder.start(1000);
+
+    isRecording=true;
+    document.getElementById('btn3').textContent='■ 停止并保存';
+    log('✓ 本地录像已开始');
+
+  }catch(e){
+    log('✗ 录像失败: '+e.message);
+    alert('录像启动失败：'+e.message);
+  }
+}
+
+function stopRecording(){
+  if(recorder && isRecording){
+    recorder.stop();
+    isRecording=false;
+    document.getElementById('btn3').textContent='⏺ 开始本地录像';
+    log('正在保存视频...');
+  }
+}
+
+function saveRecording(){
+  const blob=new Blob(recordingChunks,{type:'video/mp4'});
+  const url=URL.createObjectURL(blob);
+
+  const a=document.createElement('a');
+  a.href=url;
+  a.download='trace_flight_'+Date.now()+'.mp4';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+
+  log('✓ 视频已保存到文件');
+}
+</script>
 </body>
 </html>

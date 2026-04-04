@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
@@ -62,7 +63,6 @@ canvas{display:block}
 .coord-display{font-size:10px;color:#3a6a9a;letter-spacing:1px;display:flex;gap:16px}
 .coord-display span{color:#5a8aaa}
 .mission-status{font-family:'Orbitron',sans-serif;font-size:9px;letter-spacing:3px;color:var(--green);text-shadow:0 0 8px var(--green);animation:flicker 4s ease-in-out infinite}
-.link-status{font-family:'Orbitron',sans-serif;font-size:9px;letter-spacing:2px;color:var(--amber)}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.15}}
 @keyframes flicker{0%,90%,100%{opacity:1}92%{opacity:.4}94%{opacity:1}96%{opacity:.2}}
 .scan-line{position:fixed;top:0;left:0;right:0;height:3px;background:linear-gradient(180deg,transparent,rgba(0,212,255,.05),transparent);animation:scanH 8s linear infinite;pointer-events:none;z-index:998}
@@ -81,7 +81,6 @@ canvas{display:block}
   <div class="clock" id="clock">--:--:--</div>
 </div>
 <div class="main">
-  <!-- 左面板 -->
   <div class="side-panel">
     <div class="panel-block">
       <div class="block-label">ALTITUDE</div>
@@ -108,9 +107,8 @@ canvas{display:block}
       </div>
     </div>
   </div>
-  <!-- 中间视频 -->
   <div class="center">
-    <video id="videoFeed" autoplay playsinline muted></video>
+    <img id="videoFeed" style="width:100%;height:100%;object-fit:cover;display:none">
     <div class="video-placeholder" id="videoPlaceholder">
       <svg width="52" height="52" viewBox="0 0 24 24" fill="none">
         <path d="M2 8.5C5.5 5 9.5 3 12 3s6.5 2 10 5.5" stroke="#1a3a5a" stroke-width="1.5" stroke-linecap="round"/>
@@ -138,7 +136,6 @@ canvas{display:block}
       </div>
     </div>
   </div>
-  <!-- 右面板 -->
   <div class="side-panel right">
     <div class="panel-block">
       <div class="block-label">HEADING</div>
@@ -157,10 +154,11 @@ canvas{display:block}
       </div>
     </div>
     <div class="panel-block">
-      <div class="block-label">ENVIRONMENT</div>
+      <div class="block-label">LINK</div>
       <div style="font-size:10px;color:#5a8aaa;line-height:1.9">
-        <div>TEMP &nbsp;<span style="color:var(--amber)" id="temp">--.-</span> °C</div>
-        <div>PRESS <span style="color:var(--amber)" id="press">----</span> hPa</div>
+        <div>LATENCY <span style="color:var(--amber)" id="latency">---</span> ms</div>
+        <div>RECONNECT <span style="color:var(--amber)" id="reconCnt">0</span></div>
+        <div>STATUS <span style="color:var(--green)" id="linkStat">INIT</span></div>
       </div>
     </div>
     <div class="panel-block">
@@ -172,12 +170,8 @@ canvas{display:block}
       </div>
     </div>
     <div class="panel-block" style="flex:1">
-      <div class="block-label">LINK QUALITY</div>
-      <div style="font-size:10px;color:#5a8aaa;line-height:1.9">
-        <div>LATENCY <span style="color:var(--amber)" id="latency">---</span> ms</div>
-        <div>RECONNECT <span style="color:var(--amber)" id="reconCnt">0</span></div>
-        <div>STATUS <span style="color:var(--green)" id="linkStat">INIT</span></div>
-      </div>
+      <div class="block-label">DEBUG</div>
+      <div id="padDbg" style="font-size:9px;color:#3a6a4a;line-height:1.7;word-break:break-all">-</div>
     </div>
   </div>
 </div>
@@ -188,20 +182,188 @@ canvas{display:block}
 </div>
 
 <script>
-// ★ 域名已写好，不需要修改 ★
-<script>
 const SERVER='wss://trace-light-drone-server.onrender.com';
 
-let ws_p, reconnects=0, pingTimer, lastPing, latencyMs=0;
-let flightStart=null;
+const state={
+  pitch:0,roll:0,yaw:0,altitude:0,speed:0,vspeed:0,
+  gforce:1.0,heading:0,lat:null,lon:null,gpsAlt:null,
+  flightSeconds:0,accHistory:new Array(60).fill(1.0)
+};
+let useSimulation=true;
+let ws_p,reconnects=0,pingTimer,lastPing,latencyMs=0,flightStart=null;
 
-window.onload=()=>connectPad();
+function pdbg(t){document.getElementById('padDbg').textContent=t;console.log('[PAD]',t)}
 
+// 时钟
+setInterval(()=>{document.getElementById('clock').textContent=new Date().toTimeString().slice(0,8)},1000);
+
+// 飞行计时
+function updateFlightTimer(){
+  if(!flightStart)return;
+  state.flightSeconds=Math.floor((Date.now()-flightStart)/1000);
+  const h=Math.floor(state.flightSeconds/3600),m=Math.floor((state.flightSeconds%3600)/60),s=state.flightSeconds%60;
+  document.getElementById('flightTimer').textContent=
+    `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  document.getElementById('timeBar').style.width=Math.min(100,(state.flightSeconds/1800)*100)+'%';
+}
+
+// 模拟数据
+let t=0;
+function simulate(){
+  t+=0.016;
+  state.pitch=Math.sin(t*.3)*6;
+  state.roll=Math.sin(t*.25+1)*10;
+  state.yaw=(state.yaw+.25+360)%360;
+  state.heading=state.yaw;
+  state.altitude=25+Math.sin(t*.1)*5;
+  state.speed=10+Math.sin(t*.2)*4;
+  state.gforce=1+Math.abs(Math.sin(t*.3)*.12);
+  state.accHistory.push(state.gforce);state.accHistory.shift();
+}
+
+// DOM更新
+function updateDOM(){
+  const s=state;
+  document.getElementById('alt').textContent=s.altitude.toFixed(1);
+  document.getElementById('altBar').style.width=Math.min(100,(s.altitude/150)*100)+'%';
+  document.getElementById('altVal2').textContent=s.altitude.toFixed(1)+'m';
+  document.getElementById('spd').textContent=s.speed.toFixed(1);
+  document.getElementById('spdBot').textContent=s.speed.toFixed(1);
+  document.getElementById('vspd').textContent=(s.vspeed>=0?'↑':'↓')+' VSPD: '+Math.abs(s.vspeed).toFixed(1)+' m/s';
+  document.getElementById('acc').textContent=s.gforce.toFixed(2);
+  document.getElementById('pitchVal').textContent=(s.pitch>=0?'+':'')+s.pitch.toFixed(1)+'°';
+  document.getElementById('rollVal').textContent=(s.roll>=0?'+':'')+s.roll.toFixed(1)+'°';
+  document.getElementById('yawVal').textContent=String(Math.round(s.yaw)).padStart(3,'0')+'°';
+  document.getElementById('hdgVal').textContent=String(Math.round(s.heading)).padStart(3,'0')+'°';
+  document.getElementById('hdgDir').textContent=(['N','NE','E','SE','S','SW','W','NW'])[Math.round(s.heading/45)%8];
+  if(s.lat!=null){document.getElementById('lat').textContent=s.lat.toFixed(6);document.getElementById('lon').textContent=s.lon.toFixed(6);}
+  if(s.gpsAlt!=null)document.getElementById('gpsAlt').textContent=s.gpsAlt.toFixed(0);
+  document.getElementById('dist').textContent=Math.round(s.speed*s.flightSeconds/3600*1000)+'m';
+  document.getElementById('latency').textContent=latencyMs||'---';
+  document.getElementById('reconCnt').textContent=reconnects;
+  const ho=document.getElementById('horizonOverlay');
+  ho.style.transform=`translate(-50%,calc(-50% + ${-s.pitch*1.4}px)) rotate(${-s.roll}deg)`;
+  updateFlightTimer();
+}
+
+// 人工地平仪
+const hC=document.getElementById('horizonCanvas');
+function drawHorizon(){
+  const p=hC.parentElement,sz=p.offsetWidth*.93;
+  hC.width=sz;hC.height=sz;
+  const ctx=hC.getContext('2d'),W=sz,cx=W/2,cy=W/2,r=W/2-3;
+  ctx.clearRect(0,0,W,W);
+  ctx.save();ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.clip();
+  const rr=(state.roll*Math.PI)/180,pp=(state.pitch/90)*r;
+  ctx.save();ctx.translate(cx,cy);ctx.rotate(rr);
+  const sg=ctx.createLinearGradient(0,-r+pp,0,pp);
+  sg.addColorStop(0,'#002850');sg.addColorStop(1,'#004880');
+  ctx.fillStyle=sg;ctx.fillRect(-r,-r+pp-W,r*2,W);
+  const gg=ctx.createLinearGradient(0,pp,0,r+pp);
+  gg.addColorStop(0,'#3a1e00');gg.addColorStop(1,'#180c00');
+  ctx.fillStyle=gg;ctx.fillRect(-r,pp,r*2,W);
+  ctx.strokeStyle='rgba(255,255,255,.8)';ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.moveTo(-r,pp);ctx.lineTo(r,pp);ctx.stroke();
+  ctx.strokeStyle='rgba(255,255,255,.4)';ctx.lineWidth=.8;
+  ctx.font=`${W*.055}px Share Tech Mono`;ctx.fillStyle='rgba(255,255,255,.4)';ctx.textAlign='center';
+  for(let d=-30;d<=30;d+=10){
+    if(d===0)continue;
+    const y=pp-(d/90)*r,w=Math.abs(d)===10?r*.22:r*.32;
+    ctx.beginPath();ctx.moveTo(-w,y);ctx.lineTo(w,y);ctx.stroke();
+    ctx.fillText(Math.abs(d),w+W*.06,y+3);
+  }
+  ctx.restore();
+  ctx.save();ctx.translate(cx,cy);
+  ctx.strokeStyle='rgba(0,212,255,.35)';ctx.lineWidth=.8;
+  ctx.beginPath();ctx.arc(0,0,r-7,-Math.PI*.75,-Math.PI*.25);ctx.stroke();
+  for(let a=-60;a<=60;a+=10){
+    const rad=(a-90)*Math.PI/180;
+    ctx.strokeStyle=a===0?'rgba(0,212,255,.9)':'rgba(0,212,255,.35)';
+    ctx.lineWidth=a===0?1.5:.7;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(rad)*(r-13),Math.sin(rad)*(r-13));
+    ctx.lineTo(Math.cos(rad)*(r-7),Math.sin(rad)*(r-7));
+    ctx.stroke();
+  }
+  ctx.rotate(rr);ctx.fillStyle='rgba(0,212,255,.85)';
+  ctx.beginPath();ctx.moveTo(0,-(r-7));ctx.lineTo(-4,-(r-18));ctx.lineTo(4,-(r-18));ctx.closePath();ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle='rgba(245,166,35,.85)';ctx.lineWidth=1.8;
+  ctx.beginPath();
+  ctx.moveTo(cx-r*.33,cy);ctx.lineTo(cx-r*.14,cy);
+  ctx.moveTo(cx-r*.14,cy);ctx.lineTo(cx,cy+r*.07);ctx.lineTo(cx+r*.14,cy);
+  ctx.moveTo(cx+r*.14,cy);ctx.lineTo(cx+r*.33,cy);
+  ctx.moveTo(cx-r*.09,cy-r*.23);ctx.lineTo(cx+r*.09,cy-r*.23);
+  ctx.stroke();
+  ctx.restore();
+  ctx.strokeStyle='#1a3a5a';ctx.lineWidth=3;
+  ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.stroke();
+}
+
+// 罗盘
+const cC=document.getElementById('compassCanvas');
+function drawCompass(){
+  const sz=cC.parentElement.offsetWidth*.93;
+  cC.width=sz;cC.height=sz;
+  const ctx=cC.getContext('2d'),W=sz,cx=W/2,cy=W/2,r=W/2-5,hdg=state.heading;
+  ctx.clearRect(0,0,W,W);
+  const bg=ctx.createRadialGradient(cx,cy,0,cx,cy,r);
+  bg.addColorStop(0,'#081420');bg.addColorStop(1,'#030810');
+  ctx.fillStyle=bg;ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle='#1a3a5a';ctx.lineWidth=2;
+  ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.stroke();
+  ctx.save();ctx.translate(cx,cy);ctx.rotate(-hdg*Math.PI/180);
+  const dirs=['N','NE','E','SE','S','SW','W','NW'];
+  for(let i=0;i<360;i+=5){
+    const rad=i*Math.PI/180,iM=i%45===0,im=i%10===0;
+    const inn=iM?r*.62:im?r*.73:r*.81;
+    ctx.strokeStyle=iM?'rgba(0,212,255,.8)':'rgba(0,212,255,.22)';
+    ctx.lineWidth=iM?1.5:.5;
+    ctx.beginPath();
+    ctx.moveTo(Math.sin(rad)*inn,-Math.cos(rad)*inn);
+    ctx.lineTo(Math.sin(rad)*(r-4),-Math.cos(rad)*(r-4));
+    ctx.stroke();
+    if(iM){
+      const lb=dirs[i/45],fr=r*.54;
+      ctx.fillStyle=lb==='N'?'#ff3b3b':'rgba(0,212,255,.8)';
+      ctx.font=`bold ${W*.075}px Orbitron`;
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(lb,Math.sin(rad)*fr,-Math.cos(rad)*fr);
+    }
+  }
+  ctx.restore();
+  ctx.fillStyle='#ff3b3b';
+  ctx.beginPath();ctx.moveTo(cx,cy-r+2);ctx.lineTo(cx-4,cy-r+11);ctx.lineTo(cx+4,cy-r+11);ctx.closePath();ctx.fill();
+  const dg=ctx.createRadialGradient(cx,cy,0,cx,cy,7);
+  dg.addColorStop(0,'rgba(0,212,255,.7)');dg.addColorStop(1,'transparent');
+  ctx.fillStyle=dg;ctx.beginPath();ctx.arc(cx,cy,7,0,Math.PI*2);ctx.fill();
+}
+
+// 加速度折线
+const spC=document.getElementById('accSpark');
+function drawSpark(){
+  const W=spC.parentElement.offsetWidth,H=38;
+  spC.width=W;spC.height=H;
+  const ctx=spC.getContext('2d'),data=state.accHistory,mn=0.8,mx=1.5,dx=W/(data.length-1);
+  ctx.clearRect(0,0,W,H);
+  const gr=ctx.createLinearGradient(0,0,0,H);
+  gr.addColorStop(0,'rgba(0,212,255,.28)');gr.addColorStop(1,'rgba(0,212,255,0)');
+  ctx.fillStyle=gr;ctx.beginPath();
+  data.forEach((v,i)=>{const x=i*dx,y=H-((v-mn)/(mx-mn))*H;i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});
+  ctx.lineTo(W,H);ctx.closePath();ctx.fill();
+  ctx.strokeStyle='rgba(0,212,255,.8)';ctx.lineWidth=1.5;ctx.beginPath();
+  data.forEach((v,i)=>{const x=i*dx,y=H-((v-mn)/(mx-mn))*H;i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});
+  ctx.stroke();
+}
+
+// WebSocket
 function connectPad(){
-  try{ws_p=new WebSocket(SERVER)}catch(e){setTimeout(connectPad,4000);return}
+  pdbg('连接中...');
+  try{ws_p=new WebSocket(SERVER)}catch(e){pdbg('创建失败:'+e.message);setTimeout(connectPad,4000);return}
 
   ws_p.onopen=()=>{
     reconnects=0;
+    pdbg('已连接，发送ipad-hello');
     ws_p.send(JSON.stringify({type:'ipad-hello'}));
     setDot('dotServer','green');
     document.getElementById('linkStat').textContent='ONLINE';
@@ -214,6 +376,7 @@ function connectPad(){
 
   ws_p.onmessage=(e)=>{
     let msg;try{msg=JSON.parse(e.data)}catch{return}
+    pdbg('收到:'+msg.type);
 
     if(msg.type==='pong'){
       latencyMs=Date.now()-lastPing;
@@ -221,6 +384,7 @@ function connectPad(){
     }
 
     if(msg.type==='iphone-online'){
+      pdbg('iPhone上线！');
       setDot('dotPhone','green');
       document.getElementById('lblPhone').textContent='iPhone在线';
       document.getElementById('missionTxt').textContent='■ MISSION ACTIVE';
@@ -228,8 +392,8 @@ function connectPad(){
     }
 
     if(msg.type==='iphone-offline'){
-      setDot('dotPhone','off');
-      setDot('dotVideo','off');
+      pdbg('iPhone离线');
+      setDot('dotPhone','off');setDot('dotVideo','off');
       document.getElementById('lblPhone').textContent='iPhone离线';
       document.getElementById('noSigTxt').textContent='iPhone 信号丢失，等待重连...';
       document.getElementById('videoFeed').style.display='none';
@@ -239,26 +403,22 @@ function connectPad(){
 
     if(msg.type==='frame'){
       const img=document.getElementById('videoFeed');
-      // 用img标签显示jpeg帧
-      if(img.tagName==='VIDEO'){
-        // 替换video为img
-        const newImg=document.createElement('img');
-        newImg.id='videoFeed';
-        newImg.style.cssText='width:100%;height:100%;object-fit:cover;display:block';
-        img.parentNode.replaceChild(newImg,img);
+      img.src=msg.data;
+      if(img.style.display==='none'){
+        img.style.display='block';
         document.getElementById('videoPlaceholder').style.display='none';
         setDot('dotVideo','green');
         document.getElementById('lblVideo').textContent='视频正常';
+        pdbg('视频已接收');
       }
-      document.getElementById('videoFeed').src=msg.data;
     }
 
     if(msg.type==='sensors'){
       const d=msg.data;
       useSimulation=false;
-      state.pitch=d.pitch; state.roll=d.roll;
-      state.heading=d.heading; state.yaw=d.heading;
-      state.gforce=d.gforce; state.speed=d.speed;
+      state.pitch=d.pitch;state.roll=d.roll;
+      state.heading=d.heading;state.yaw=d.heading;
+      state.gforce=d.gforce;state.speed=d.speed;
       if(d.altitude!=null)state.altitude=d.altitude;
       if(d.lat!=null){state.lat=d.lat;state.lon=d.lon;}
       state.accHistory.push(d.gforce);state.accHistory.shift();
@@ -268,19 +428,35 @@ function connectPad(){
   ws_p.onclose=()=>{
     clearInterval(pingTimer);
     reconnects++;
+    pdbg('断线，第'+reconnects+'次重连');
     setDot('dotServer','warn');
     document.getElementById('linkStat').textContent='RECONNECTING';
     document.getElementById('linkStat').style.color='var(--amber)';
     document.getElementById('reconCnt').textContent=reconnects;
     setTimeout(connectPad,Math.min(16000,1000*Math.pow(2,Math.min(reconnects-1,4))));
   };
-  ws_p.onerror=()=>{};
+
+  ws_p.onerror=(e)=>{pdbg('WS错误');};
 }
 
 function setDot(id,st){
   const d=document.getElementById(id);
   d.className='dot'+(st==='warn'?' warn':st==='off'?' off':'');
 }
+
+// 主循环
+function loop(){
+  if(useSimulation)simulate();
+  updateDOM();drawHorizon();drawCompass();drawSpark();
+  requestAnimationFrame(loop);
+}
+
+window.onload=()=>{
+  pdbg('页面加载');
+  connectPad();
+  loop();
+};
 </script>
+
 </body>
 </html>

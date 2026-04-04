@@ -14,13 +14,10 @@ let iphone = null;
 const ipads = new Set();
 
 wss.on('connection', (ws) => {
+
   ws.on('message', (raw) => {
     let msg;
-    // 先尝试解析文字消息
-    try {
-      msg = JSON.parse(raw);
-    } catch {
-      // 二进制帧（视频帧）直接转发给所有iPad
+    try { msg = JSON.parse(raw); } catch {
       for (const c of ipads) {
         try { if (c.readyState === 1) c.send(raw); } catch {}
       }
@@ -28,23 +25,32 @@ wss.on('connection', (ws) => {
     }
 
     if (msg.type === 'iphone-hello') {
-      iphone = ws; ws.role = 'iphone';
+      iphone = ws;
+      ws.role = 'iphone';
       console.log('iPhone connected');
+      // 通知所有已在线的iPad
       broadcast(ipads, { type: 'iphone-online' });
     }
+
     else if (msg.type === 'ipad-hello') {
-      ipads.add(ws); ws.role = 'ipad';
-      console.log('iPad connected:', ipads.size);
-      if (iphone) ws.send(JSON.stringify({ type: 'iphone-online' }));
+      ipads.add(ws);
+      ws.role = 'ipad';
+      console.log('iPad connected, total:', ipads.size);
+      // iPhone已在线则立刻告知这个iPad
+      if (iphone && iphone.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'iphone-online' }));
+      }
     }
+
     else if (msg.type === 'ping') {
       ws.send(JSON.stringify({ type: 'pong' }));
     }
+
     else if (msg.type === 'sensors') {
       broadcast(ipads, msg);
     }
+
     else if (msg.type === 'frame') {
-      // base64视频帧转发
       broadcast(ipads, msg);
     }
   });
@@ -52,14 +58,24 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     if (ws.role === 'iphone') {
       iphone = null;
-      broadcast(ipads, { type: 'iphone-offline' });
       console.log('iPhone disconnected');
+      broadcast(ipads, { type: 'iphone-offline' });
     } else if (ws.role === 'ipad') {
       ipads.delete(ws);
+      console.log('iPad disconnected');
     }
   });
 
   ws.on('error', () => {});
+
+  // 心跳保活，防止Render断开空闲连接
+  const keepalive = setInterval(() => {
+    if (ws.readyState === 1) {
+      ws.ping();
+    } else {
+      clearInterval(keepalive);
+    }
+  }, 25000);
 });
 
 function broadcast(set, obj) {

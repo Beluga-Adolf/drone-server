@@ -145,12 +145,19 @@ async function startAll(){
     return;
   }
 
+  if(typeof DeviceOrientationEvent?.requestPermission==='function'){
+    try{
+      const r1=await DeviceOrientationEvent.requestPermission();
+      dbg('方向权限:'+r1);
+    }catch(e){dbg('方向权限异常:'+e.message);}
+  }
   if(typeof DeviceMotionEvent?.requestPermission==='function'){
     try{
-      const r=await DeviceMotionEvent.requestPermission();
-      dbg('传感器权限:'+r);
-    }catch(e){dbg('传感器权限异常:'+e.message);}
+      const r2=await DeviceMotionEvent.requestPermission();
+      dbg('运动权限:'+r2);
+    }catch(e){dbg('运动权限异常:'+e.message);}
   }
+
 
   window.addEventListener('deviceorientation',(e)=>{
     sensor.pitch=+(e.beta??0).toFixed(1);
